@@ -301,4 +301,47 @@ describe("VelocityEngine", () => {
     expect(resumed.baselineMessagesPerMinute).toBeGreaterThan(1_100);
     expect(resumed.shouldNotify).toBe(false);
   });
+
+  it("restores a warm message-count baseline from a compact checkpoint", () => {
+    const original = new VelocityEngine();
+    const restored = new VelocityEngine();
+    const login = "restored";
+
+    recordConstantRate(original, login, 0, 360_000, 20, "baseline");
+    const checkpoint = original.exportState(360_000);
+
+    expect(restored.importState(checkpoint, 360_000)).toBe(true);
+    recordConstantRate(restored, login, 360_000, 365_000, 30, "surge");
+
+    const result = restored.evaluate(login, "high", 0, 364_999);
+    expect(result.baselineReady).toBe(true);
+    expect(result.shouldNotify).toBe(true);
+  });
+
+  it("does not persist chatter identifiers in velocity checkpoints", () => {
+    const engine = new VelocityEngine();
+    engine.recordMessage("private", "message-id", 1_000, "sensitive-chatter-id");
+
+    const serialized = JSON.stringify(engine.exportState(1_000));
+
+    expect(serialized).not.toContain("sensitive-chatter-id");
+  });
+
+  it("rejects malformed and stale velocity checkpoints", () => {
+    const engine = new VelocityEngine();
+
+    expect(engine.importState({ version: 99 }, 1_000)).toBe(false);
+    expect(
+      engine.importState(
+        {
+          version: 1,
+          savedAt: 0,
+          channels: [null],
+          coverageGaps: []
+        },
+        1_000
+      )
+    ).toBe(true);
+    expect(engine.getSnapshot("fresh", "high", 1_000).baselineReady).toBe(false);
+  });
 });

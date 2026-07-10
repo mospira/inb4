@@ -18,6 +18,7 @@ export const EVENTSUB_LIVENESS_GRACE_MS = 5_000;
 export const AUTH_VALIDATE_ALARM = "inb4-auth-validate";
 export const EVENTSUB_RECOVER_ALARM = "inb4-eventsub-recover";
 export const CLIP_POLL_ALARM = "inb4-clip-poll";
+export const VELOCITY_SESSION_STORAGE_KEY = "velocitySession";
 
 export const STORAGE_KEYS = {
   auth: "auth",
@@ -66,6 +67,8 @@ export const BASELINE_LOOKBACK_MS = 5 * 60_000;
 export const BASELINE_EXCLUSION_MS = VELOCITY_WINDOW_MS;
 export const VELOCITY_RETENTION_MS =
   BASELINE_LOOKBACK_MS + BASELINE_EXCLUSION_MS + VELOCITY_WINDOW_MS;
+export const VELOCITY_CHECKPOINT_INTERVAL_MS = 5_000;
+export const VELOCITY_CHECKPOINT_VERSION = 1;
 export const MIN_BASELINE_WINDOWS = 4;
 export const CHATTER_DATA_COVERAGE_RATIO = 0.9;
 export const MIN_BASELINE_DISTINCT_CHATTERS = 5;

@@ -11,7 +11,9 @@ import {
   PENDING_CHAT_CONFIRMATION_WINDOW_MS,
   SENSITIVITY_PRESETS,
   STORAGE_KEYS,
-  TWITCH_CLIENT_ID
+  TWITCH_CLIENT_ID,
+  VELOCITY_CHECKPOINT_INTERVAL_MS,
+  VELOCITY_SESSION_STORAGE_KEY
 } from "../shared/constants";
 import { assertValidLogin, normalizeLogin } from "../shared/login";
 import {
@@ -76,7 +78,6 @@ import type { CreatedClip } from "./twitchApi";
 import { StartupNotificationWarmup } from "./startupWarmup";
 
 const velocity = new VelocityEngine();
-velocity.markUnavailable();
 const clipSignals = new ClipSignalTracker();
 const startupWarmup = new StartupNotificationWarmup(COLD_START_MS);
 const NOTIFICATION_CLIP_DURATION_SECONDS = 60;
@@ -89,6 +90,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let clipPollInFlight = false;
 let lastEventSubMessageAt: number | undefined;
 let eventSubKeepaliveTimeoutSeconds: number | undefined;
+let velocityCheckpointTimer: ReturnType<typeof setTimeout> | undefined;
 let eventSubState: EventSubRuntimeState = {
   socketState: "idle"
 };
@@ -103,42 +105,49 @@ const pendingChatConfirmations = new Map<
 >();
 const notificationClipUrls = new Map<string, string>();
 const notificationAttempts = new Set<string>();
+const velocityInitialization = restoreVelocityState();
 
 chrome.runtime.onInstalled.addListener(() => {
   scheduleRecurringAlarms();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  startFreshTrackingSession();
-  scheduleRecurringAlarms();
-  void refreshTrackedChannelProfiles();
-  void ensureEventSub();
-  void pollRecentClips();
+  void velocityInitialization.then(() => {
+    startFreshTrackingSession();
+    scheduleRecurringAlarms();
+    void refreshTrackedChannelProfiles();
+    void ensureEventSub();
+    void pollRecentClips();
+  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === AUTH_VALIDATE_ALARM) {
-    void validateStoredAuth();
-    return;
-  }
+  void velocityInitialization.then(() => {
+    if (alarm.name === AUTH_VALIDATE_ALARM) {
+      void validateStoredAuth();
+      return;
+    }
 
-  if (alarm.name === EVENTSUB_RECOVER_ALARM) {
-    void ensureEventSub();
-    return;
-  }
+    if (alarm.name === EVENTSUB_RECOVER_ALARM) {
+      void ensureEventSub();
+      return;
+    }
 
-  if (alarm.name === CLIP_POLL_ALARM) {
-    void pollRecentClips();
-    return;
-  }
+    if (alarm.name === CLIP_POLL_ALARM) {
+      void pollRecentClips();
+    }
+  });
 });
 
-chrome.storage.onChanged.addListener(() => {
-  storageCache = null;
+chrome.storage.onChanged.addListener((_changes, areaName) => {
+  if (areaName === "local") {
+    storageCache = null;
+  }
 });
 
 chrome.runtime.onMessage.addListener((message: RuntimeCommand, _sender, sendResponse) => {
-  void handleCommand(message)
+  void velocityInitialization
+    .then(() => handleCommand(message))
     .then((data) => {
       sendResponse({ ok: true, data } satisfies RuntimeResponse);
     })
@@ -161,17 +170,74 @@ chrome.notifications.onClosed.addListener((notificationId) => {
   void deleteNotificationClipUrl(notificationId);
 });
 
-scheduleRecurringAlarms();
-void refreshTrackedChannelProfiles();
-void ensureEventSub();
-void pollRecentClips();
+void velocityInitialization.then(() => {
+  scheduleRecurringAlarms();
+  void refreshTrackedChannelProfiles();
+  void ensureEventSub();
+  void pollRecentClips();
+});
 
 function startFreshTrackingSession(): void {
   velocity.clear();
-  velocity.markUnavailable();
+  markVelocityUnavailable();
   clipSignals.clear();
   pendingChatConfirmations.clear();
   startupWarmup.start();
+}
+
+async function restoreVelocityState(): Promise<void> {
+  try {
+    const stored = await chrome.storage.session.get(
+      VELOCITY_SESSION_STORAGE_KEY
+    );
+    velocity.importState(stored[VELOCITY_SESSION_STORAGE_KEY]);
+  } catch {
+    // A missing or unavailable session checkpoint should fall back to cold start.
+  } finally {
+    velocity.markUnavailable();
+  }
+}
+
+function scheduleVelocityCheckpoint(): void {
+  if (velocityCheckpointTimer) {
+    return;
+  }
+
+  velocityCheckpointTimer = setTimeout(() => {
+    velocityCheckpointTimer = undefined;
+    void persistVelocityState();
+  }, VELOCITY_CHECKPOINT_INTERVAL_MS);
+}
+
+async function persistVelocityState(): Promise<void> {
+  try {
+    await chrome.storage.session.set({
+      [VELOCITY_SESSION_STORAGE_KEY]: velocity.exportState()
+    });
+  } catch {
+    // Detection remains functional in memory if checkpointing is unavailable.
+  }
+}
+
+async function clearVelocityCheckpoint(): Promise<void> {
+  clearTimeout(velocityCheckpointTimer);
+  velocityCheckpointTimer = undefined;
+
+  try {
+    await chrome.storage.session.remove(VELOCITY_SESSION_STORAGE_KEY);
+  } catch {
+    // Local data clearing should continue even if session storage is unavailable.
+  }
+}
+
+function markVelocityUnavailable(now = Date.now()): void {
+  velocity.markUnavailable(now);
+  scheduleVelocityCheckpoint();
+}
+
+function markVelocityAvailable(now = Date.now()): void {
+  velocity.markAvailable(now);
+  scheduleVelocityCheckpoint();
 }
 
 async function handleCommand(command: RuntimeCommand): Promise<PublicAppState> {
@@ -219,6 +285,7 @@ async function handleCommand(command: RuntimeCommand): Promise<PublicAppState> {
       subscriptionsByLogin.clear();
       notificationClipUrls.clear();
       notificationAttempts.clear();
+      await clearVelocityCheckpoint();
       await clearStorageAndCache();
       eventSubState = { socketState: "idle" };
       return getPublicState();
@@ -336,6 +403,7 @@ async function addChannel(input: string): Promise<void> {
 async function removeChannel(input: string): Promise<void> {
   const login = normalizeLogin(input);
   velocity.clear(login);
+  scheduleVelocityCheckpoint();
   clipSignals.clear(login);
   pendingChatConfirmations.delete(login);
   subscriptionsByLogin.delete(login);
@@ -568,7 +636,7 @@ function openEventSubSocket(
         lastError: "EventSub WebSocket error."
       };
       if (socket === nextSocket) {
-        velocity.markUnavailable();
+        markVelocityUnavailable();
       }
     }
   });
@@ -590,7 +658,7 @@ function openEventSubSocket(
     }
 
     socket = null;
-    velocity.markUnavailable();
+    markVelocityUnavailable();
     lastEventSubMessageAt = undefined;
     eventSubKeepaliveTimeoutSeconds = undefined;
     subscriptionsByLogin.clear();
@@ -646,17 +714,17 @@ async function handleEventSubMessage(
           oldSocket.close(1000, "EventSub migration complete.");
         }
 
-        velocity.markAvailable();
+        markVelocityAvailable();
         return;
       }
 
       await subscribeEnabledChannels(auth, welcome.payload.session.id);
-      velocity.markAvailable();
+      markVelocityAvailable();
       return;
     }
 
     case "session_keepalive":
-      velocity.markAvailable();
+      markVelocityAvailable();
       eventSubState = {
         ...eventSubState,
         lastKeepaliveAt: Date.now(),
@@ -686,7 +754,7 @@ async function handleEventSubMessage(
     }
 
     case "notification":
-      velocity.markAvailable();
+      markVelocityAvailable();
       if (message.metadata.subscription_type === "channel.chat.message") {
         await handleChatNotification(message as EventSubChatMessageNotification);
       }
@@ -769,6 +837,8 @@ async function handleChatNotification(
   if (!recorded) {
     return;
   }
+
+  scheduleVelocityCheckpoint();
 
   await maybeNotifyForChannel(channel, stored, now);
 }
@@ -904,6 +974,7 @@ async function maybeNotifyForChannel(
     });
 
     velocity.activateSpike(channel.login, now);
+    scheduleVelocityCheckpoint();
 
     if (notification.clipUrl) {
       await saveNotificationClipUrl(notification.notificationId, notification.clipUrl);
@@ -1211,7 +1282,7 @@ function scheduleReconnect(): void {
 
 function closeEventSub(reason: string): void {
   clearTimeout(reconnectTimer);
-  velocity.markUnavailable();
+  markVelocityUnavailable();
 
   if (socket) {
     const closingSocket = socket;

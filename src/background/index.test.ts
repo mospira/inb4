@@ -128,6 +128,22 @@ describe("background service worker", () => {
 
     expect(storage.auth).not.toBeNull();
   });
+
+  it("checks session storage for detector state before opening EventSub", async () => {
+    const storage = createStorage();
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    await import("./index");
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+    expect(chromeStub.storage.session.get).toHaveBeenCalledWith(
+      "velocitySession"
+    );
+  });
 });
 
 function createStorage(): StorageShape {
@@ -186,6 +202,11 @@ function createChromeStub(storage: StorageShape): {
       get: ReturnType<typeof vi.fn>;
       set: ReturnType<typeof vi.fn>;
     };
+    session: {
+      get: ReturnType<typeof vi.fn>;
+      set: ReturnType<typeof vi.fn>;
+      remove: ReturnType<typeof vi.fn>;
+    };
     onChanged: { addListener: ReturnType<typeof vi.fn> };
   };
   tabs: { create: ReturnType<typeof vi.fn> };
@@ -196,6 +217,7 @@ function createChromeStub(storage: StorageShape): {
     channels: storage.channels,
     settings: storage.settings
   };
+  const sessionStorage: Record<string, unknown> = {};
 
   return {
     alarms: {
@@ -254,6 +276,15 @@ function createChromeStub(storage: StorageShape): {
           if ("settings" in values) {
             storage.settings = values.settings as StorageShape["settings"];
           }
+        })
+      },
+      session: {
+        get: vi.fn(async (key: string) => ({ [key]: sessionStorage[key] })),
+        set: vi.fn(async (values: Record<string, unknown>) => {
+          Object.assign(sessionStorage, values);
+        }),
+        remove: vi.fn(async (key: string) => {
+          delete sessionStorage[key];
         })
       },
       onChanged: { addListener: vi.fn() }

@@ -8,10 +8,12 @@ import {
   EMERGENCY_MESSAGES_PER_MINUTE,
   EMERGENCY_WINDOW_MS,
   MAX_DUPLICATE_IDS,
+  MAX_TRACKED_CHANNELS,
   MIN_BASELINE_DISTINCT_CHATTERS,
   MIN_BASELINE_WINDOWS,
   SENSITIVITY_PRESETS,
   VELOCITY_BUCKET_MS,
+  VELOCITY_CHECKPOINT_VERSION,
   VELOCITY_RETENTION_MS,
   VELOCITY_WINDOWS_MS,
   VELOCITY_WINDOW_MS
@@ -60,6 +62,22 @@ interface WindowCounts {
 interface CoverageGap {
   startedAt: number;
   endedAt?: number;
+}
+
+export interface VelocityEngineCheckpoint {
+  version: typeof VELOCITY_CHECKPOINT_VERSION;
+  savedAt: number;
+  channels: Array<{
+    login: string;
+    baselineStartedAt: number;
+    spikeActive: boolean;
+    buckets: Array<{
+      startedAt: number;
+      messageCount: number;
+    }>;
+    seenMessageIds: string[];
+  }>;
+  coverageGaps: CoverageGap[];
 }
 
 interface EvaluatedSnapshot {
@@ -246,6 +264,119 @@ export class VelocityEngine {
     );
     this.openCoverageGap = undefined;
     this.pruneCoverageGaps(now);
+  }
+
+  exportState(now = Date.now()): VelocityEngineCheckpoint {
+    for (const state of this.states.values()) {
+      this.prune(state, now);
+    }
+    this.pruneCoverageGaps(now);
+
+    return {
+      version: VELOCITY_CHECKPOINT_VERSION,
+      savedAt: now,
+      channels: Array.from(this.states, ([login, state]) => ({
+        login,
+        baselineStartedAt: state.baselineStartedAt,
+        spikeActive: state.spikeActive,
+        buckets: Array.from(state.buckets.values(), (bucket) => ({
+          startedAt: bucket.startedAt,
+          messageCount: bucket.messageCount
+        })),
+        seenMessageIds: [...state.seenMessageIds]
+      })),
+      coverageGaps: this.coverageGaps.map((gap) => ({ ...gap }))
+    };
+  }
+
+  importState(value: unknown, now = Date.now()): boolean {
+    if (!this.isCheckpoint(value, now)) {
+      return false;
+    }
+
+    this.clear();
+    const maxBuckets = Math.ceil(VELOCITY_RETENTION_MS / VELOCITY_BUCKET_MS) + 2;
+
+    for (const channel of value.channels.slice(0, MAX_TRACKED_CHANNELS)) {
+      if (
+        !this.isRecord(channel) ||
+        typeof channel.login !== "string" ||
+        channel.login.length === 0 ||
+        channel.login.length > 100 ||
+        !Number.isFinite(channel.baselineStartedAt) ||
+        !Array.isArray(channel.buckets) ||
+        !Array.isArray(channel.seenMessageIds)
+      ) {
+        continue;
+      }
+
+      const buckets = new Map<number, VelocityBucket>();
+      for (const candidate of channel.buckets.slice(0, maxBuckets)) {
+        if (
+          !this.isRecord(candidate) ||
+          !Number.isFinite(candidate.startedAt) ||
+          candidate.startedAt % VELOCITY_BUCKET_MS !== 0 ||
+          candidate.startedAt < now - VELOCITY_RETENTION_MS ||
+          candidate.startedAt > now + VELOCITY_BUCKET_MS ||
+          !Number.isInteger(candidate.messageCount) ||
+          candidate.messageCount < 0 ||
+          candidate.messageCount > 1_000_000
+        ) {
+          continue;
+        }
+
+        buckets.set(candidate.startedAt, {
+          startedAt: candidate.startedAt,
+          messageCount: candidate.messageCount,
+          identifiedMessageCount: 0,
+          chatterUserIds: new Set()
+        });
+      }
+
+      const seenMessageIds = channel.seenMessageIds
+        .filter(
+          (messageId): messageId is string =>
+            typeof messageId === "string" &&
+            messageId.length > 0 &&
+            messageId.length <= 256
+        )
+        .slice(-MAX_DUPLICATE_IDS);
+
+      this.states.set(channel.login, {
+        buckets,
+        seenMessageIds,
+        seenMessageIdSet: new Set(seenMessageIds),
+        baselineStartedAt: Math.min(channel.baselineStartedAt, now),
+        spikeActive: channel.spikeActive === true
+      });
+    }
+
+    for (const candidate of value.coverageGaps.slice(0, maxBuckets)) {
+      if (
+        !this.isRecord(candidate) ||
+        !Number.isFinite(candidate.startedAt) ||
+        candidate.startedAt > now ||
+        (candidate.endedAt !== undefined &&
+          (!Number.isFinite(candidate.endedAt) ||
+            candidate.endedAt < candidate.startedAt))
+      ) {
+        continue;
+      }
+
+      const gap: CoverageGap = {
+        startedAt: candidate.startedAt,
+        ...(candidate.endedAt !== undefined
+          ? { endedAt: Math.min(candidate.endedAt, now) }
+          : {})
+      };
+      this.coverageGaps.push(gap);
+      if (gap.endedAt === undefined && !this.openCoverageGap) {
+        this.openCoverageGap = gap;
+      }
+    }
+
+    this.pruneCoverageGaps(now);
+    return true;
   }
 
   activateSpike(channelLogin: string, now = Date.now()): void {
@@ -558,6 +689,29 @@ export class VelocityEngine {
         this.coverageGaps.splice(index, 1);
       }
     }
+  }
+
+  private isCheckpoint(
+    value: unknown,
+    now: number
+  ): value is VelocityEngineCheckpoint {
+    if (!this.isRecord(value)) {
+      return false;
+    }
+
+    return (
+      value.version === VELOCITY_CHECKPOINT_VERSION &&
+      typeof value.savedAt === "number" &&
+      Number.isFinite(value.savedAt) &&
+      value.savedAt <= now + VELOCITY_BUCKET_MS &&
+      value.savedAt >= now - VELOCITY_RETENTION_MS &&
+      Array.isArray(value.channels) &&
+      Array.isArray(value.coverageGaps)
+    );
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
   }
 
   private getMultiplier(snapshot: VelocitySnapshot): number {
