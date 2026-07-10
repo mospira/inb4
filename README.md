@@ -99,7 +99,7 @@ Host access is limited to Twitch authentication, API, image, and EventSub endpoi
 
 The locally stored Twitch access token is sensitive. You can disconnect Twitch or use **Clear local data** from the options page to remove extension data from the current Chrome profile.
 
-Distinct-chatter analysis is performed in service-worker memory. Raw chatter IDs and message text are not written to the detector checkpoint; only bucket counts, hashed message-deduplication tokens, coverage gaps, and detector state are kept in Chrome session storage. Session detector data is also removed by **Clear local data**.
+Distinct-chatter analysis is performed in service-worker memory. Raw chatter IDs and message text are not written to the detector checkpoint; the channel login, bucket counts, hashed message-deduplication tokens, coverage gaps, and detector state are kept in Chrome session storage. Session detector data is also removed by **Clear local data**.
 
 Before a Chrome Web Store release, the project still needs appropriate store privacy disclosures and a published privacy policy covering the locally stored token, tracked-channel metadata, notifications, and optional clip creation.
 
