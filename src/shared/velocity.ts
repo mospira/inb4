@@ -1,6 +1,8 @@
 import {
   BASELINE_EXCLUSION_MS,
   BASELINE_LOOKBACK_MS,
+  BUSY_SPIKE_CONFIRMATION_BUCKETS,
+  BUSY_SPIKE_LOOKBACK_BUCKETS,
   CHATTER_DATA_COVERAGE_RATIO,
   COLD_START_MS,
   DEFAULT_SETTINGS,
@@ -39,6 +41,8 @@ interface ChannelVelocityState {
   seenMessageTokenSet: Set<string>;
   baselineStartedAt: number;
   spikeActive: boolean;
+  candidateBucketStarts: number[];
+  candidateScoreThreshold?: number;
 }
 
 interface SeenMessage {
@@ -195,7 +199,12 @@ export class VelocityEngine {
       now - lastNotificationAt >= effectiveCooldownSeconds * 1000;
     const overBaseline =
       snapshot.baselineReady &&
-      this.isSpikeCount(evaluated.windows, preset.strongChatScore);
+      this.confirmSpikeCandidate(
+        state,
+        evaluated.windows,
+        preset.strongChatScore,
+        now
+      );
     const emergency =
       !snapshot.baselineReady &&
       emergencyMessagesPerMinute >= EMERGENCY_MESSAGES_PER_MINUTE;
@@ -205,12 +214,14 @@ export class VelocityEngine {
 
     if (state.spikeActive && recovered) {
       state.spikeActive = false;
+      this.clearSpikeCandidate(state);
     }
 
     const shouldNotify = !state.spikeActive && cooldownElapsed && overBaseline;
 
     if (shouldNotify && options.commitSpike !== false) {
       state.spikeActive = true;
+      this.clearSpikeCandidate(state);
     }
 
     return {
@@ -237,6 +248,7 @@ export class VelocityEngine {
       snapshot.spikeScore < preset.recoveryScore
     ) {
       state.spikeActive = false;
+      this.clearSpikeCandidate(state);
     }
 
     return {
@@ -379,7 +391,8 @@ export class VelocityEngine {
           seenMessages.map((message) => message.token)
         ),
         baselineStartedAt: Math.min(channel.baselineStartedAt, now),
-        spikeActive: channel.spikeActive === true
+        spikeActive: channel.spikeActive === true,
+        candidateBucketStarts: []
       });
     }
 
@@ -417,6 +430,7 @@ export class VelocityEngine {
   activateSpike(channelLogin: string, now = Date.now()): void {
     const state = this.getState(channelLogin, now);
     state.spikeActive = true;
+    this.clearSpikeCandidate(state);
   }
 
   private getState(channelLogin: string, now: number): ChannelVelocityState {
@@ -432,7 +446,8 @@ export class VelocityEngine {
       seenMessageHead: 0,
       seenMessageTokenSet: new Set(),
       baselineStartedAt: now,
-      spikeActive: false
+      spikeActive: false,
+      candidateBucketStarts: []
     };
 
     this.states.set(channelLogin, created);
@@ -606,20 +621,61 @@ export class VelocityEngine {
     };
   }
 
-  private isSpikeCount(
+  private confirmSpikeCandidate(
+    state: ChannelVelocityState,
     windows: WindowEvaluation[],
+    scoreThreshold: number,
+    now: number
+  ): boolean {
+    const qualifyingWindows = windows.filter((window) =>
+      this.isSpikeWindow(window, scoreThreshold)
+    );
+    const currentBucketStartedAt = this.getBucketStartedAt(now);
+    const earliestCandidateAt =
+      currentBucketStartedAt -
+      (BUSY_SPIKE_LOOKBACK_BUCKETS - 1) * VELOCITY_BUCKET_MS;
+    state.candidateBucketStarts = state.candidateBucketStarts.filter(
+      (candidateAt) => candidateAt >= earliestCandidateAt
+    );
+
+    if (qualifyingWindows.length === 0) {
+      return false;
+    }
+
+    const requiresPersistence = qualifyingWindows.some(
+      (window) =>
+        window.chatterDataCoverage >= CHATTER_DATA_COVERAGE_RATIO &&
+        window.baselineDistinctChatters >= MIN_BASELINE_DISTINCT_CHATTERS
+    );
+    if (!requiresPersistence) {
+      return true;
+    }
+
+    if (state.candidateScoreThreshold !== scoreThreshold) {
+      state.candidateBucketStarts = [];
+      state.candidateScoreThreshold = scoreThreshold;
+    }
+    if (!state.candidateBucketStarts.includes(currentBucketStartedAt)) {
+      state.candidateBucketStarts.push(currentBucketStartedAt);
+    }
+
+    return (
+      state.candidateBucketStarts.length >= BUSY_SPIKE_CONFIRMATION_BUCKETS
+    );
+  }
+
+  private isSpikeWindow(
+    window: WindowEvaluation,
     scoreThreshold: number
   ): boolean {
-    return windows.some((window) => {
-      const thresholdCount =
-        window.baselineCount + scoreThreshold * window.standardDeviation;
+    const thresholdCount =
+      window.baselineCount + scoreThreshold * window.standardDeviation;
 
-      return (
-        window.score >= scoreThreshold &&
-        window.currentCount >= Math.ceil(thresholdCount) &&
-        this.hasDistinctChatterConfirmation(window)
-      );
-    });
+    return (
+      window.score >= scoreThreshold &&
+      window.currentCount >= Math.ceil(thresholdCount) &&
+      this.hasDistinctChatterConfirmation(window)
+    );
   }
 
   private hasDistinctChatterConfirmation(window: WindowEvaluation): boolean {
@@ -631,6 +687,11 @@ export class VelocityEngine {
     }
 
     return window.chatterScore >= DISTINCT_CHATTER_CONFIRMATION_SCORE;
+  }
+
+  private clearSpikeCandidate(state: ChannelVelocityState): void {
+    state.candidateBucketStarts = [];
+    state.candidateScoreThreshold = undefined;
   }
 
   private getBaselineSamples(

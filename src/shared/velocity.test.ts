@@ -251,8 +251,26 @@ describe("VelocityEngine", () => {
       (index) => `surge-user-${index}`
     );
 
+    const firstCandidate = engine.evaluate(
+      login,
+      "high",
+      0,
+      363_999,
+      undefined,
+      { commitSpike: false }
+    );
+    const repeatedCandidate = engine.evaluate(
+      login,
+      "high",
+      0,
+      363_999,
+      undefined,
+      { commitSpike: false }
+    );
     const result = engine.evaluate(login, "high", 0, 364_999);
 
+    expect(firstCandidate.shouldNotify).toBe(false);
+    expect(repeatedCandidate.shouldNotify).toBe(false);
     expect(result.shouldNotify).toBe(true);
     expect(result.chatterScore).toBeGreaterThanOrEqual(0.75);
   });

@@ -13,7 +13,7 @@
 ## Highlights
 
 - **Robust multi-scale detection:** Compares 3, 8, 20, and 30-second chat activity with a lagged, rolling per-channel baseline.
-- **Crowd confirmation:** Uses distinct chatter participation to distinguish broad reactions from single-user message floods when enough chatter data is available.
+- **Crowd confirmation:** Uses distinct chatter participation and short persistence to distinguish broad reactions from single-user floods or one-bucket delivery noise when enough chatter data is available.
 - **Up to 10 channels:** Track several Twitch communities from one extension.
 - **Adjustable sensitivity:** Choose a global sensitivity and override it per channel.
 - **Desktop notifications:** Jump back when chat suggests something worth seeing is happening.
@@ -26,7 +26,7 @@
 1. You connect a Twitch account and add channels to track.
 2. `inb4` subscribes to Twitch chat events through EventSub.
 3. The extension groups chat into one-second buckets and learns a robust five-minute baseline that excludes the most recent 30 seconds.
-4. It scores 3, 8, 20, and 30-second windows, confirms high-volume reactions with distinct chatter participation when possible, and ignores periods where EventSub coverage was unavailable.
+4. It scores 3, 8, 20, and 30-second windows, confirms high-volume reactions with distinct chatter participation across two nearby one-second buckets when possible, and ignores periods where EventSub coverage was unavailable.
 5. When activity rises far enough above that baseline, `inb4` sends a notification, subject to the configured cooldown.
 6. If optional clip creation is enabled, the extension can request a Twitch clip alongside the alert.
 
