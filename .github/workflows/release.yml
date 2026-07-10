@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-master
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Prepare or publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Run Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Check out released source
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+
+      - name: Set up Node.js
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: npm ci
+
+      - name: Build extension
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        run: npm run build
+
+      - name: Package extension
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        shell: bash
+        run: |
+          cd dist
+          zip -r "../inb4-${{ steps.release.outputs.version }}.zip" .
+
+      - name: Attach extension ZIP to GitHub Release
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ steps.release.outputs.tag_name }}" "inb4-${{ steps.release.outputs.version }}.zip" --clobber

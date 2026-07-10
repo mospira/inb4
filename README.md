@@ -117,9 +117,24 @@ npm run typecheck
 
 The codebase uses TypeScript, Vite, Vitest, native DOM APIs, and Chrome extension APIs.
 
+### CI and releases
+
+GitHub Actions runs `npm run typecheck`, `npm test`, and `npm run build` for pull requests targeting `master` and for pushes to `master`.
+
+Releases use [Release Please](https://github.com/googleapis/release-please-action) and Conventional Commit semantics:
+
+- `fix:` proposes a PATCH release.
+- `feat:` proposes a MINOR release.
+- `<type>!:` or a `BREAKING CHANGE:` footer proposes a MAJOR release.
+
+Release Please maintains a release pull request that synchronizes `package.json`, `package-lock.json`, `.release-please-manifest.json`, `public/manifest.json`, and this project's changelog. Merging that pull request creates a `vMAJOR.MINOR.PATCH` tag and GitHub Release. The release workflow builds the extension and attaches an `inb4-MAJOR.MINOR.PATCH.zip` containing the contents of `dist/`.
+
+Chrome manifest versions must remain numeric. Prerelease labels and build metadata require a separate versioning scheme and are not currently supported by the automated release workflow. Publishing the ZIP to the Chrome Web Store remains a manual step.
+
 ### Project structure
 
 ```text
+.github/workflows/ CI and Release Please automation
 src/background/  Twitch, EventSub, alarms, clips, and notifications
 src/shared/      Shared types, storage, validation, and spike calculations
 src/popup/       Toolbar popup
