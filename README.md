@@ -8,6 +8,11 @@
   <strong>Catch your favorite Twitch moments.</strong>
 </p>
 
+<p align="center">
+  <a href="https://www.google.com/chrome/"><img src="https://img.shields.io/badge/Chrome-120%2B-4285F4?logo=googlechrome&logoColor=white" alt="Chrome 120 or newer"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+</p>
+
 `inb4` is a Chrome extension that watches the pace of Twitch chat and sends a desktop notification when conversation suddenly spikes. It learns each channel's normal activity, so alerts are based on unusual momentum instead of a single fixed message threshold.
 
 ## Highlights
@@ -147,7 +152,7 @@ Build output in `dist/` is generated and should not be edited by hand.
 
 ## License
 
-No open-source license has been selected yet.
+Licensed under the [MIT License](LICENSE).
 
 ## Disclaimer
 
