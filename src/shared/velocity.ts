@@ -57,6 +57,11 @@ interface WindowCounts {
   distinctChatters: number;
 }
 
+interface CoverageGap {
+  startedAt: number;
+  endedAt?: number;
+}
+
 interface EvaluatedSnapshot {
   snapshot: VelocitySnapshot;
   windows: WindowEvaluation[];
@@ -85,6 +90,8 @@ export interface VelocityTrigger extends VelocitySnapshot {
 
 export class VelocityEngine {
   private readonly states = new Map<string, ChannelVelocityState>();
+  private readonly coverageGaps: CoverageGap[] = [];
+  private openCoverageGap: CoverageGap | undefined;
 
   recordMessage(
     channelLogin: string,
@@ -215,6 +222,30 @@ export class VelocityEngine {
     }
 
     this.states.clear();
+    this.coverageGaps.length = 0;
+    this.openCoverageGap = undefined;
+  }
+
+  markUnavailable(now = Date.now()): void {
+    if (this.openCoverageGap) {
+      return;
+    }
+
+    this.openCoverageGap = { startedAt: now };
+    this.coverageGaps.push(this.openCoverageGap);
+  }
+
+  markAvailable(now = Date.now()): void {
+    if (!this.openCoverageGap) {
+      return;
+    }
+
+    this.openCoverageGap.endedAt = Math.max(
+      now,
+      this.openCoverageGap.startedAt
+    );
+    this.openCoverageGap = undefined;
+    this.pruneCoverageGaps(now);
   }
 
   activateSpike(channelLogin: string, now = Date.now()): void {
@@ -268,6 +299,10 @@ export class VelocityEngine {
     const baselineRatePerSecond =
       displayWindow.baselineCount / VELOCITY_WINDOW_SECONDS;
     const baselineAgeMs = now - state.baselineStartedAt;
+    const currentWindowCovered = this.isRangeCovered(
+      now - VELOCITY_WINDOW_MS,
+      now
+    );
 
     return {
       snapshot: {
@@ -282,6 +317,7 @@ export class VelocityEngine {
         chatterScore: strongestWindow.chatterScore,
         baselineReady:
           baselineAgeMs >= COLD_START_MS &&
+          currentWindowCovered &&
           windows.every(
             (window) => window.baselineSamples >= MIN_BASELINE_WINDOWS
           ),
@@ -409,13 +445,13 @@ export class VelocityEngine {
       earliestSampleStartedAt;
       sampleEndedAt -= windowMs
     ) {
-      samples.push(
-        this.countBucketStats(
-          state,
-          sampleEndedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS,
-          sampleEndedAt
-        )
-      );
+      const sampleStartedAt =
+        sampleEndedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS;
+      if (this.isRangeCovered(sampleStartedAt, sampleEndedAt)) {
+        samples.push(
+          this.countBucketStats(state, sampleStartedAt, sampleEndedAt)
+        );
+      }
     }
 
     return samples;
@@ -504,6 +540,24 @@ export class VelocityEngine {
 
   private getBucketStartedAt(timestamp: number): number {
     return Math.floor(timestamp / VELOCITY_BUCKET_MS) * VELOCITY_BUCKET_MS;
+  }
+
+  private isRangeCovered(startedAt: number, endedAt: number): boolean {
+    return !this.coverageGaps.some((gap) => {
+      const gapEndedAt = gap.endedAt ?? Number.POSITIVE_INFINITY;
+      return gap.startedAt <= endedAt && gapEndedAt > startedAt;
+    });
+  }
+
+  private pruneCoverageGaps(now: number): void {
+    const earliestRetainedAt = now - VELOCITY_RETENTION_MS;
+
+    for (let index = this.coverageGaps.length - 1; index >= 0; index -= 1) {
+      const gap = this.coverageGaps[index];
+      if (gap.endedAt !== undefined && gap.endedAt < earliestRetainedAt) {
+        this.coverageGaps.splice(index, 1);
+      }
+    }
   }
 
   private getMultiplier(snapshot: VelocitySnapshot): number {

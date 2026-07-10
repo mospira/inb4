@@ -76,6 +76,7 @@ import type { CreatedClip } from "./twitchApi";
 import { StartupNotificationWarmup } from "./startupWarmup";
 
 const velocity = new VelocityEngine();
+velocity.markUnavailable();
 const clipSignals = new ClipSignalTracker();
 const startupWarmup = new StartupNotificationWarmup(COLD_START_MS);
 const NOTIFICATION_CLIP_DURATION_SECONDS = 60;
@@ -167,6 +168,7 @@ void pollRecentClips();
 
 function startFreshTrackingSession(): void {
   velocity.clear();
+  velocity.markUnavailable();
   clipSignals.clear();
   pendingChatConfirmations.clear();
   startupWarmup.start();
@@ -565,6 +567,9 @@ function openEventSubSocket(
         socketState: "error",
         lastError: "EventSub WebSocket error."
       };
+      if (socket === nextSocket) {
+        velocity.markUnavailable();
+      }
     }
   });
 
@@ -585,6 +590,7 @@ function openEventSubSocket(
     }
 
     socket = null;
+    velocity.markUnavailable();
     lastEventSubMessageAt = undefined;
     eventSubKeepaliveTimeoutSeconds = undefined;
     subscriptionsByLogin.clear();
@@ -640,14 +646,17 @@ async function handleEventSubMessage(
           oldSocket.close(1000, "EventSub migration complete.");
         }
 
+        velocity.markAvailable();
         return;
       }
 
       await subscribeEnabledChannels(auth, welcome.payload.session.id);
+      velocity.markAvailable();
       return;
     }
 
     case "session_keepalive":
+      velocity.markAvailable();
       eventSubState = {
         ...eventSubState,
         lastKeepaliveAt: Date.now(),
@@ -677,6 +686,7 @@ async function handleEventSubMessage(
     }
 
     case "notification":
+      velocity.markAvailable();
       if (message.metadata.subscription_type === "channel.chat.message") {
         await handleChatNotification(message as EventSubChatMessageNotification);
       }
@@ -1201,6 +1211,7 @@ function scheduleReconnect(): void {
 
 function closeEventSub(reason: string): void {
   clearTimeout(reconnectTimer);
+  velocity.markUnavailable();
 
   if (socket) {
     const closingSocket = socket;

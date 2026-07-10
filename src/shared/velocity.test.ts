@@ -281,4 +281,24 @@ describe("VelocityEngine", () => {
     expect(result.chatterScore).toBeLessThan(0.75);
     expect(result.shouldNotify).toBe(false);
   });
+
+  it("treats connection gaps as missing coverage instead of quiet chat", () => {
+    const engine = new VelocityEngine();
+    const login = "reconnecting";
+
+    recordConstantRate(engine, login, 0, 360_000, 20, "baseline");
+    engine.markUnavailable(360_000);
+
+    const disconnected = engine.evaluate(login, "high", 0, 389_999);
+    expect(disconnected.baselineReady).toBe(false);
+    expect(disconnected.shouldNotify).toBe(false);
+
+    engine.markAvailable(390_000);
+    recordConstantRate(engine, login, 390_000, 425_000, 20, "resumed");
+
+    const resumed = engine.evaluate(login, "high", 0, 424_999);
+    expect(resumed.baselineReady).toBe(true);
+    expect(resumed.baselineMessagesPerMinute).toBeGreaterThan(1_100);
+    expect(resumed.shouldNotify).toBe(false);
+  });
 });
