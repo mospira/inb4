@@ -93,6 +93,7 @@ export class VelocityEngine {
     chatterUserId = ""
   ): boolean {
     const state = this.getState(channelLogin, now);
+    state.baselineStartedAt = Math.min(state.baselineStartedAt, now);
 
     if (messageId && state.seenMessageIdSet.has(messageId)) {
       return false;

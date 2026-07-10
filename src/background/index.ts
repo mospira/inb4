@@ -42,6 +42,7 @@ import type {
 import { RuntimeCommandError, getRuntimeErrorCode, getRuntimeErrorMessage } from "../shared/runtimeError";
 import { isSensitivityPresetName, SettingsValidationError, validateSettingsPatch } from "../shared/settingsValidation";
 import { ClipSignalTracker } from "../shared/clipSignal";
+import { resolveEventTimestamp } from "../shared/eventTimestamp";
 import { VelocityEngine } from "../shared/velocity";
 import {
   connectTwitch,
@@ -741,10 +742,17 @@ async function handleChatNotification(
   }
 
   const now = Date.now();
+  const eventTimestamp = resolveEventTimestamp(
+    message.metadata.message_timestamp,
+    now
+  );
+  if (eventTimestamp === null) {
+    return;
+  }
   const recorded = velocity.recordMessage(
     channel.login,
     message.payload.event.message_id || message.metadata.message_id,
-    now,
+    eventTimestamp,
     message.payload.event.chatter_user_id
   );
 
