@@ -6,7 +6,7 @@ The velocity replay command evaluates aggregate one-second chat traces through t
 npm run replay:velocity -- fixtures/velocity-replay.example.json
 ```
 
-The command reports detector alerts, label recall, unmatched alert count, median detection latency, and the controls needed to compare runs. It does not tune thresholds or modify the trace.
+The command reports detector alerts, label recall, unmatched alert count, false alerts per covered channel-hour, median detection latency, and the controls needed to compare runs. It does not tune thresholds or modify the trace.
 
 ## Temporal contract
 

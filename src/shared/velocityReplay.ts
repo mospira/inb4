@@ -56,6 +56,8 @@ export interface VelocityReplayResult {
     matchedLabelCount: number;
     recall: number | null;
     falseAlertCount: number;
+    coveredHours: number;
+    falseAlertsPerCoveredHour: number | null;
     medianDetectionLatencyMs: number | null;
   };
 }
@@ -143,7 +145,12 @@ export function runVelocityReplay(value: unknown): VelocityReplayResult {
         trace.cooldownSeconds ?? DEFAULT_SETTINGS.defaultCooldownSeconds,
       labelMatchWindowMs: trace.labelMatchWindowMs ?? 60_000
     },
-    metrics: scoreAlerts(alerts, trace.labels ?? [], trace.labelMatchWindowMs)
+    metrics: scoreAlerts(
+      alerts,
+      trace.labels ?? [],
+      trace.labelMatchWindowMs,
+      trace.buckets.filter((bucket) => bucket.covered).length
+    )
   };
 }
 
@@ -333,7 +340,8 @@ function validateOptionalPositiveNumber(
 function scoreAlerts(
   alerts: VelocityReplayAlert[],
   labels: VelocityReplayLabel[],
-  labelMatchWindowMs = 60_000
+  labelMatchWindowMs = 60_000,
+  coveredBucketCount = 0
 ): VelocityReplayResult["metrics"] {
   const matchedAlertIndexes = new Set<number>();
   const latencies: number[] = [];
@@ -351,11 +359,17 @@ function scoreAlerts(
     }
   }
 
+  const falseAlertCount = alerts.length - matchedAlertIndexes.size;
+  const coveredHours = (coveredBucketCount * VELOCITY_BUCKET_MS) / 3_600_000;
+
   return {
     labelCount: labels.length,
     matchedLabelCount: latencies.length,
     recall: labels.length > 0 ? latencies.length / labels.length : null,
-    falseAlertCount: alerts.length - matchedAlertIndexes.size,
+    falseAlertCount,
+    coveredHours,
+    falseAlertsPerCoveredHour:
+      coveredHours > 0 ? falseAlertCount / coveredHours : null,
     medianDetectionLatencyMs: median(latencies)
   };
 }

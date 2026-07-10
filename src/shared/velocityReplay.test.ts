@@ -42,8 +42,10 @@ describe("runVelocityReplay", () => {
       labelCount: 1,
       matchedLabelCount: 1,
       recall: 1,
-      falseAlertCount: 0
+      falseAlertCount: 0,
+      falseAlertsPerCoveredHour: 0
     });
+    expect(result.metrics.coveredHours).toBeCloseTo(365 / 3_600);
   });
 
   it("keeps future labels out of detector decisions", () => {
