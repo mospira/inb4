@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "inb4",
+  "version": "0.1.0",
+  "description": "Notify when tracked Twitch chats spike in message velocity.",
+  "minimum_chrome_version": "120",
+  "action": {
+    "default_icon": {
+      "128": "icons/icon128.png"
+    },
+    "default_title": "inb4",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["identity", "notifications", "storage", "alarms"],
+  "host_permissions": [
+    "https://id.twitch.tv/*",
+    "https://api.twitch.tv/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://id.twitch.tv https://api.twitch.tv wss://eventsub.wss.twitch.tv; img-src 'self' https://static-cdn.jtvnw.net data:"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "inb4",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Chrome extension that notifies when Twitch chat velocity spikes.",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "clean": "rimraf dist coverage",
+    "dev": "vite build --watch --mode development",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.326",
+    "@types/node": "^24.0.7",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.0",
+    "vitest": "^3.2.4"
+  }
+}
