@@ -58,9 +58,13 @@ export const DEFAULT_SETTINGS = {
   globalSensitivity: "medium"
 } as const;
 
+export const VELOCITY_BUCKET_MS = 1_000;
+export const VELOCITY_WINDOWS_MS = [3_000, 8_000, 20_000, 30_000] as const;
+export type VelocityWindowMs = (typeof VELOCITY_WINDOWS_MS)[number];
 export const VELOCITY_WINDOW_MS = 30_000;
-export const BASELINE_SAMPLE_INTERVAL_MS = 5_000;
-export const BASELINE_EMA_ALPHA = 0.05;
+export const BASELINE_LOOKBACK_MS = 5 * 60_000;
+export const BASELINE_EXCLUSION_MS = VELOCITY_WINDOW_MS;
+export const MIN_BASELINE_WINDOWS = 4;
 export const COLD_START_MS = 180_000;
 export const EMERGENCY_WINDOW_MS = 30_000;
 export const EMERGENCY_MESSAGES_PER_MINUTE = 100;

@@ -1,30 +1,49 @@
 import {
-  BASELINE_EMA_ALPHA,
-  BASELINE_SAMPLE_INTERVAL_MS,
+  BASELINE_EXCLUSION_MS,
+  BASELINE_LOOKBACK_MS,
   COLD_START_MS,
   DEFAULT_SETTINGS,
   EMERGENCY_MESSAGES_PER_MINUTE,
   EMERGENCY_WINDOW_MS,
   MAX_DUPLICATE_IDS,
   MAX_TIMESTAMP_AGE_MS,
+  MIN_BASELINE_WINDOWS,
   SENSITIVITY_PRESETS,
+  VELOCITY_BUCKET_MS,
+  VELOCITY_WINDOWS_MS,
   VELOCITY_WINDOW_MS
 } from "./constants";
+import type { VelocityWindowMs } from "./constants";
 import type { SensitivityPreset, SensitivityPresetName } from "./types";
 
 const VELOCITY_WINDOW_SECONDS = VELOCITY_WINDOW_MS / 1000;
 const EMERGENCY_WINDOW_SECONDS = EMERGENCY_WINDOW_MS / 1000;
 
+interface VelocityBucket {
+  startedAt: number;
+  messageCount: number;
+}
+
 interface ChannelVelocityState {
-  timestamps: number[];
+  buckets: Map<number, VelocityBucket>;
   seenMessageIds: string[];
   seenMessageIdSet: Set<string>;
-  baselineCount: number;
-  baselineVariance: number;
-  baselineSamples: number;
   baselineStartedAt: number;
-  lastBaselineSampleAt: number;
   spikeActive: boolean;
+}
+
+interface WindowEvaluation {
+  windowMs: VelocityWindowMs;
+  currentCount: number;
+  baselineCount: number;
+  standardDeviation: number;
+  score: number;
+  baselineSamples: number;
+}
+
+interface EvaluatedSnapshot {
+  snapshot: VelocitySnapshot;
+  windows: WindowEvaluation[];
 }
 
 export interface VelocitySnapshot {
@@ -34,6 +53,7 @@ export interface VelocitySnapshot {
   currentMessagesPerMinute: number;
   baselineMessagesPerMinute: number;
   spikeScore: number;
+  spikeWindowMs: VelocityWindowMs;
   baselineReady: boolean;
   spikeActive: boolean;
   baselineAgeMs: number;
@@ -67,7 +87,13 @@ export class VelocityEngine {
       }
     }
 
-    state.timestamps.push(now);
+    const bucketStartedAt = this.getBucketStartedAt(now);
+    const bucket = state.buckets.get(bucketStartedAt) ?? {
+      startedAt: bucketStartedAt,
+      messageCount: 0
+    };
+    bucket.messageCount += 1;
+    state.buckets.set(bucketStartedAt, bucket);
     this.prune(state, now);
 
     return true;
@@ -84,13 +110,12 @@ export class VelocityEngine {
     const preset = this.getSensitivityPreset(sensitivity);
     const state = this.getState(channelLogin, now);
     this.prune(state, now);
-    this.advanceBaseline(state, now, preset.strongChatScore);
-
-    const snapshot = this.getSnapshotFromState(state, now);
-    const emergencyCount = this.countBetween(
+    const evaluated = this.getSnapshotFromState(state, now);
+    const snapshot = evaluated.snapshot;
+    const emergencyCount = this.countBuckets(
       state,
-      now - EMERGENCY_WINDOW_MS,
-      now
+      this.getBucketStartedAt(now - EMERGENCY_WINDOW_MS),
+      this.getBucketStartedAt(now)
     );
     const emergencyMessagesPerMinute =
       (emergencyCount / EMERGENCY_WINDOW_SECONDS) * 60;
@@ -103,12 +128,7 @@ export class VelocityEngine {
       now - lastNotificationAt >= effectiveCooldownSeconds * 1000;
     const overBaseline =
       snapshot.baselineReady &&
-      this.isSpikeCount(
-        state,
-        snapshot.shortCount,
-        snapshot.spikeScore,
-        preset.strongChatScore
-      );
+      this.isSpikeCount(evaluated.windows, preset.strongChatScore);
     const emergency =
       !snapshot.baselineReady &&
       emergencyMessagesPerMinute >= EMERGENCY_MESSAGES_PER_MINUTE;
@@ -143,9 +163,7 @@ export class VelocityEngine {
     const preset = this.getSensitivityPreset(sensitivity);
     const state = this.getState(channelLogin, now);
     this.prune(state, now);
-    this.advanceBaseline(state, now, preset.strongChatScore);
-
-    const snapshot = this.getSnapshotFromState(state, now);
+    const snapshot = this.getSnapshotFromState(state, now).snapshot;
     if (
       state.spikeActive &&
       snapshot.baselineReady &&
@@ -182,14 +200,10 @@ export class VelocityEngine {
     }
 
     const created: ChannelVelocityState = {
-      timestamps: [],
+      buckets: new Map(),
       seenMessageIds: [],
       seenMessageIdSet: new Set(),
-      baselineCount: 0,
-      baselineVariance: 0,
-      baselineSamples: 0,
       baselineStartedAt: now,
-      lastBaselineSampleAt: now,
       spikeActive: false
     };
 
@@ -199,145 +213,176 @@ export class VelocityEngine {
 
   private prune(state: ChannelVelocityState, now: number): void {
     const minTimestamp = now - MAX_TIMESTAMP_AGE_MS;
-    while (state.timestamps.length > 0 && state.timestamps[0] < minTimestamp) {
-      state.timestamps.shift();
-    }
-  }
-
-  private advanceBaseline(
-    state: ChannelVelocityState,
-    now: number,
-    spikeScoreThreshold: number
-  ): void {
-    const oldestUsefulSampleAt = now - MAX_TIMESTAMP_AGE_MS;
-    if (state.lastBaselineSampleAt < oldestUsefulSampleAt) {
-      state.lastBaselineSampleAt = oldestUsefulSampleAt;
-    }
-
-    while (state.lastBaselineSampleAt + BASELINE_SAMPLE_INTERVAL_MS <= now) {
-      const sampleAt = state.lastBaselineSampleAt + BASELINE_SAMPLE_INTERVAL_MS;
-      const sampleAgeMs = sampleAt - state.baselineStartedAt;
-      const sampleCount = this.countBetween(
-        state,
-        sampleAt - VELOCITY_WINDOW_MS,
-        sampleAt
-      );
-      const sampleReady =
-        sampleAgeMs >= COLD_START_MS && state.baselineSamples > 0;
-      const sampleScore = this.getSpikeScore(state, sampleCount);
-      const sampleIsSpike =
-        sampleReady &&
-        this.isSpikeCount(
-          state,
-          sampleCount,
-          sampleScore,
-          spikeScoreThreshold
-        );
-
-      if (!sampleIsSpike && (!state.spikeActive || !sampleReady)) {
-        this.updateBaseline(state, sampleCount);
+    for (const bucketStartedAt of state.buckets.keys()) {
+      if (bucketStartedAt < minTimestamp) {
+        state.buckets.delete(bucketStartedAt);
       }
-
-      state.lastBaselineSampleAt = sampleAt;
     }
-  }
-
-  private updateBaseline(state: ChannelVelocityState, count: number): void {
-    if (state.baselineSamples === 0) {
-      state.baselineCount = count;
-      state.baselineVariance = 0;
-      state.baselineSamples = 1;
-      return;
-    }
-
-    const delta = count - state.baselineCount;
-    const nextMean = state.baselineCount + BASELINE_EMA_ALPHA * delta;
-    const nextVariance =
-      (1 - BASELINE_EMA_ALPHA) *
-      (state.baselineVariance + BASELINE_EMA_ALPHA * delta * delta);
-
-    state.baselineCount = nextMean;
-    state.baselineVariance = Math.max(0, nextVariance);
-    state.baselineSamples += 1;
   }
 
   private getSnapshotFromState(
     state: ChannelVelocityState,
     now: number
-  ): VelocitySnapshot {
-    const shortCount = this.countBetween(
-      state,
-      now - VELOCITY_WINDOW_MS,
-      now
+  ): EvaluatedSnapshot {
+    const windows = VELOCITY_WINDOWS_MS.map((windowMs) =>
+      this.evaluateWindow(state, now, windowMs)
     );
+    const displayWindow =
+      windows.find((window) => window.windowMs === VELOCITY_WINDOW_MS) ??
+      windows[windows.length - 1];
+    const strongestWindow = windows.reduce((strongest, candidate) =>
+      candidate.score > strongest.score ? candidate : strongest
+    );
+    const shortCount = displayWindow.currentCount;
     const shortRatePerSecond = shortCount / VELOCITY_WINDOW_SECONDS;
     const baselineRatePerSecond =
-      state.baselineCount / VELOCITY_WINDOW_SECONDS;
+      displayWindow.baselineCount / VELOCITY_WINDOW_SECONDS;
     const baselineAgeMs = now - state.baselineStartedAt;
 
     return {
-      shortCount,
-      shortRatePerSecond,
-      baselineRatePerSecond,
-      currentMessagesPerMinute: shortRatePerSecond * 60,
-      baselineMessagesPerMinute: baselineRatePerSecond * 60,
-      spikeScore: this.getSpikeScore(state, shortCount),
-      baselineReady:
-        baselineAgeMs >= COLD_START_MS && state.baselineSamples > 0,
-      spikeActive: state.spikeActive,
-      baselineAgeMs
+      snapshot: {
+        shortCount,
+        shortRatePerSecond,
+        baselineRatePerSecond,
+        currentMessagesPerMinute: shortRatePerSecond * 60,
+        baselineMessagesPerMinute: baselineRatePerSecond * 60,
+        spikeScore: strongestWindow.score,
+        spikeWindowMs: strongestWindow.windowMs,
+        baselineReady:
+          baselineAgeMs >= COLD_START_MS &&
+          windows.every(
+            (window) => window.baselineSamples >= MIN_BASELINE_WINDOWS
+          ),
+        spikeActive: state.spikeActive,
+        baselineAgeMs
+      },
+      windows
     };
   }
 
-  private countBetween(
+  private evaluateWindow(
     state: ChannelVelocityState,
-    minTimestamp: number,
-    maxTimestamp: number
+    now: number,
+    windowMs: VelocityWindowMs
+  ): WindowEvaluation {
+    const currentCount = this.countWindow(state, now, windowMs);
+    const baselineSamples = this.getBaselineSamples(state, now, windowMs);
+    const baselineCount = this.median(baselineSamples);
+    const medianAbsoluteDeviation = this.median(
+      baselineSamples.map((sample) => Math.abs(sample - baselineCount))
+    );
+    const standardDeviation = Math.max(
+      medianAbsoluteDeviation * 1.4826,
+      Math.sqrt(Math.max(baselineCount, 1))
+    );
+
+    return {
+      windowMs,
+      currentCount,
+      baselineCount,
+      standardDeviation,
+      score:
+        baselineSamples.length > 0
+          ? (currentCount - baselineCount) / standardDeviation
+          : 0,
+      baselineSamples: baselineSamples.length
+    };
+  }
+
+  private isSpikeCount(
+    windows: WindowEvaluation[],
+    scoreThreshold: number
+  ): boolean {
+    return windows.some((window) => {
+      const thresholdCount =
+        window.baselineCount + scoreThreshold * window.standardDeviation;
+
+      return (
+        window.score >= scoreThreshold &&
+        window.currentCount >= Math.ceil(thresholdCount)
+      );
+    });
+  }
+
+  private getBaselineSamples(
+    state: ChannelVelocityState,
+    now: number,
+    windowMs: VelocityWindowMs
+  ): number[] {
+    const currentBucketStartedAt = this.getBucketStartedAt(now);
+    const earliestSampleStartedAt = Math.max(
+      this.getBucketStartedAt(state.baselineStartedAt),
+      currentBucketStartedAt - BASELINE_LOOKBACK_MS
+    );
+    const windowBucketCount = windowMs / VELOCITY_BUCKET_MS;
+    const samples: number[] = [];
+
+    for (
+      let sampleEndedAt = currentBucketStartedAt - BASELINE_EXCLUSION_MS;
+      sampleEndedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS >=
+      earliestSampleStartedAt;
+      sampleEndedAt -= windowMs
+    ) {
+      samples.push(
+        this.countBuckets(
+          state,
+          sampleEndedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS,
+          sampleEndedAt
+        )
+      );
+    }
+
+    return samples;
+  }
+
+  private countWindow(
+    state: ChannelVelocityState,
+    now: number,
+    windowMs: number
+  ): number {
+    const currentBucketStartedAt = this.getBucketStartedAt(now);
+    const windowBucketCount = windowMs / VELOCITY_BUCKET_MS;
+
+    return this.countBuckets(
+      state,
+      currentBucketStartedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS,
+      currentBucketStartedAt
+    );
+  }
+
+  private countBuckets(
+    state: ChannelVelocityState,
+    firstBucketStartedAt: number,
+    lastBucketStartedAt: number
   ): number {
     let count = 0;
 
-    for (let index = state.timestamps.length - 1; index >= 0; index -= 1) {
-      const timestamp = state.timestamps[index];
-
-      if (timestamp > maxTimestamp) {
-        continue;
-      }
-
-      if (timestamp < minTimestamp) {
-        break;
-      }
-
-      count += 1;
+    for (
+      let bucketStartedAt = firstBucketStartedAt;
+      bucketStartedAt <= lastBucketStartedAt;
+      bucketStartedAt += VELOCITY_BUCKET_MS
+    ) {
+      count += state.buckets.get(bucketStartedAt)?.messageCount ?? 0;
     }
 
     return count;
   }
 
-  private getSpikeScore(state: ChannelVelocityState, count: number): number {
-    if (state.baselineSamples === 0) {
+  private median(values: number[]): number {
+    if (values.length === 0) {
       return 0;
     }
 
-    return (count - state.baselineCount) / this.getBaselineStdDev(state);
+    const sorted = [...values].sort((left, right) => left - right);
+    const middle = Math.floor(sorted.length / 2);
+
+    return sorted.length % 2 === 0
+      ? (sorted[middle - 1] + sorted[middle]) / 2
+      : sorted[middle];
   }
 
-  private getBaselineStdDev(state: ChannelVelocityState): number {
-    return Math.max(
-      Math.sqrt(state.baselineVariance),
-      Math.sqrt(Math.max(state.baselineCount, 1))
-    );
-  }
-
-  private isSpikeCount(
-    state: ChannelVelocityState,
-    count: number,
-    score: number,
-    scoreThreshold: number
-  ): boolean {
-    const thresholdCount =
-      state.baselineCount + scoreThreshold * this.getBaselineStdDev(state);
-
-    return score >= scoreThreshold && count >= Math.ceil(thresholdCount);
+  private getBucketStartedAt(timestamp: number): number {
+    return Math.floor(timestamp / VELOCITY_BUCKET_MS) * VELOCITY_BUCKET_MS;
   }
 
   private getMultiplier(snapshot: VelocitySnapshot): number {

@@ -12,6 +12,44 @@ function warmBaseline(engine: VelocityEngine, login: string, start = 0): void {
   }
 }
 
+function recordConstantRate(
+  engine: VelocityEngine,
+  login: string,
+  start: number,
+  end: number,
+  messagesPerSecond: number,
+  prefix: string
+): void {
+  const intervalMs = 1000 / messagesPerSecond;
+
+  for (let time = start, index = 0; time < end; time += intervalMs, index += 1) {
+    engine.recordMessage(login, `${prefix}-${index}`, time);
+  }
+}
+
+function recordVariableRate(
+  engine: VelocityEngine,
+  login: string,
+  start: number,
+  end: number,
+  messagesPerSecondAt: (time: number) => number,
+  prefix: string
+): void {
+  const stepMs = 100;
+  let pendingMessages = 0;
+  let index = 0;
+
+  for (let time = start; time < end; time += stepMs) {
+    pendingMessages += (messagesPerSecondAt(time) * stepMs) / 1000;
+
+    while (pendingMessages >= 1) {
+      engine.recordMessage(login, `${prefix}-${index}`, time);
+      pendingMessages -= 1;
+      index += 1;
+    }
+  }
+}
+
 describe("VelocityEngine", () => {
   it("suppresses normal threshold notifications during cold start", () => {
     const engine = new VelocityEngine();
@@ -88,7 +126,7 @@ describe("VelocityEngine", () => {
     expect(snapshot.shortCount).toBe(1);
   });
 
-  it("updates the adaptive EMA baseline gradually", () => {
+  it("updates the robust rolling baseline after sustained quiet", () => {
     const engine = new VelocityEngine();
     const login = "summit1g";
 
@@ -134,5 +172,39 @@ describe("VelocityEngine", () => {
       16 * 60_000
     );
     expect(snapshot.shortCount).toBe(1);
+  });
+
+  it("detects a five-second surge in high-volume chat with a short window", () => {
+    const engine = new VelocityEngine();
+    const login = "busy";
+
+    recordConstantRate(engine, login, 0, 360_000, 20, "baseline");
+    recordConstantRate(engine, login, 360_000, 365_000, 30, "surge");
+
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(result.baselineMessagesPerMinute).toBeGreaterThan(1_100);
+    expect(result.shouldNotify).toBe(true);
+    expect([3_000, 8_000]).toContain(result.spikeWindowMs);
+  });
+
+  it("keeps natural high-volume rate cycling from hiding a sharp surge", () => {
+    const engine = new VelocityEngine();
+    const login = "variable";
+    const naturalRate = (time: number): number =>
+      20 * (1 + 0.2 * Math.sin((2 * Math.PI * time) / 90_000));
+
+    recordVariableRate(engine, login, 0, 360_000, naturalRate, "baseline");
+
+    const normal = engine.evaluate(login, "high", 0, 359_999, undefined, {
+      commitSpike: false
+    });
+    expect(normal.shouldNotify).toBe(false);
+
+    recordConstantRate(engine, login, 360_000, 365_000, 40, "surge");
+    const surge = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(surge.shouldNotify).toBe(true);
+    expect(surge.spikeScore).toBeGreaterThanOrEqual(2.5);
   });
 });
