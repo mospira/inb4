@@ -1,15 +1,18 @@
 import {
   BASELINE_EXCLUSION_MS,
   BASELINE_LOOKBACK_MS,
+  CHATTER_DATA_COVERAGE_RATIO,
   COLD_START_MS,
   DEFAULT_SETTINGS,
+  DISTINCT_CHATTER_CONFIRMATION_SCORE,
   EMERGENCY_MESSAGES_PER_MINUTE,
   EMERGENCY_WINDOW_MS,
   MAX_DUPLICATE_IDS,
-  MAX_TIMESTAMP_AGE_MS,
+  MIN_BASELINE_DISTINCT_CHATTERS,
   MIN_BASELINE_WINDOWS,
   SENSITIVITY_PRESETS,
   VELOCITY_BUCKET_MS,
+  VELOCITY_RETENTION_MS,
   VELOCITY_WINDOWS_MS,
   VELOCITY_WINDOW_MS
 } from "./constants";
@@ -22,6 +25,8 @@ const EMERGENCY_WINDOW_SECONDS = EMERGENCY_WINDOW_MS / 1000;
 interface VelocityBucket {
   startedAt: number;
   messageCount: number;
+  identifiedMessageCount: number;
+  chatterUserIds: Set<string>;
 }
 
 interface ChannelVelocityState {
@@ -38,7 +43,18 @@ interface WindowEvaluation {
   baselineCount: number;
   standardDeviation: number;
   score: number;
+  currentDistinctChatters: number;
+  baselineDistinctChatters: number;
+  chatterStandardDeviation: number;
+  chatterScore: number;
+  chatterDataCoverage: number;
   baselineSamples: number;
+}
+
+interface WindowCounts {
+  messageCount: number;
+  identifiedMessageCount: number;
+  distinctChatters: number;
 }
 
 interface EvaluatedSnapshot {
@@ -54,6 +70,8 @@ export interface VelocitySnapshot {
   baselineMessagesPerMinute: number;
   spikeScore: number;
   spikeWindowMs: VelocityWindowMs;
+  distinctChatters: number;
+  chatterScore: number;
   baselineReady: boolean;
   spikeActive: boolean;
   baselineAgeMs: number;
@@ -68,7 +86,12 @@ export interface VelocityTrigger extends VelocitySnapshot {
 export class VelocityEngine {
   private readonly states = new Map<string, ChannelVelocityState>();
 
-  recordMessage(channelLogin: string, messageId: string, now = Date.now()): boolean {
+  recordMessage(
+    channelLogin: string,
+    messageId: string,
+    now = Date.now(),
+    chatterUserId = ""
+  ): boolean {
     const state = this.getState(channelLogin, now);
 
     if (messageId && state.seenMessageIdSet.has(messageId)) {
@@ -90,9 +113,15 @@ export class VelocityEngine {
     const bucketStartedAt = this.getBucketStartedAt(now);
     const bucket = state.buckets.get(bucketStartedAt) ?? {
       startedAt: bucketStartedAt,
-      messageCount: 0
+      messageCount: 0,
+      identifiedMessageCount: 0,
+      chatterUserIds: new Set<string>()
     };
     bucket.messageCount += 1;
+    if (chatterUserId) {
+      bucket.identifiedMessageCount += 1;
+      bucket.chatterUserIds.add(chatterUserId);
+    }
     state.buckets.set(bucketStartedAt, bucket);
     this.prune(state, now);
 
@@ -212,7 +241,7 @@ export class VelocityEngine {
   }
 
   private prune(state: ChannelVelocityState, now: number): void {
-    const minTimestamp = now - MAX_TIMESTAMP_AGE_MS;
+    const minTimestamp = now - VELOCITY_RETENTION_MS;
     for (const bucketStartedAt of state.buckets.keys()) {
       if (bucketStartedAt < minTimestamp) {
         state.buckets.delete(bucketStartedAt);
@@ -248,6 +277,8 @@ export class VelocityEngine {
         baselineMessagesPerMinute: baselineRatePerSecond * 60,
         spikeScore: strongestWindow.score,
         spikeWindowMs: strongestWindow.windowMs,
+        distinctChatters: strongestWindow.currentDistinctChatters,
+        chatterScore: strongestWindow.chatterScore,
         baselineReady:
           baselineAgeMs >= COLD_START_MS &&
           windows.every(
@@ -265,16 +296,49 @@ export class VelocityEngine {
     now: number,
     windowMs: VelocityWindowMs
   ): WindowEvaluation {
-    const currentCount = this.countWindow(state, now, windowMs);
+    const current = this.countWindowStats(state, now, windowMs);
+    const currentCount = current.messageCount;
     const baselineSamples = this.getBaselineSamples(state, now, windowMs);
-    const baselineCount = this.median(baselineSamples);
+    const baselineMessageCounts = baselineSamples.map(
+      (sample) => sample.messageCount
+    );
+    const baselineChatterCounts = baselineSamples.map(
+      (sample) => sample.distinctChatters
+    );
+    const baselineCount = this.median(baselineMessageCounts);
     const medianAbsoluteDeviation = this.median(
-      baselineSamples.map((sample) => Math.abs(sample - baselineCount))
+      baselineMessageCounts.map((sample) => Math.abs(sample - baselineCount))
     );
     const standardDeviation = Math.max(
       medianAbsoluteDeviation * 1.4826,
       Math.sqrt(Math.max(baselineCount, 1))
     );
+    const baselineDistinctChatters = this.median(baselineChatterCounts);
+    const chatterMedianAbsoluteDeviation = this.median(
+      baselineChatterCounts.map((sample) =>
+        Math.abs(sample - baselineDistinctChatters)
+      )
+    );
+    const chatterStandardDeviation = Math.max(
+      chatterMedianAbsoluteDeviation * 1.4826,
+      Math.sqrt(Math.max(baselineDistinctChatters, 1))
+    );
+    const baselineMessageTotal = baselineSamples.reduce(
+      (total, sample) => total + sample.messageCount,
+      0
+    );
+    const identifiedMessageTotal = baselineSamples.reduce(
+      (total, sample) => total + sample.identifiedMessageCount,
+      0
+    );
+    const currentCoverage =
+      current.messageCount > 0
+        ? current.identifiedMessageCount / current.messageCount
+        : 1;
+    const baselineCoverage =
+      baselineMessageTotal > 0
+        ? identifiedMessageTotal / baselineMessageTotal
+        : 1;
 
     return {
       windowMs,
@@ -285,6 +349,15 @@ export class VelocityEngine {
         baselineSamples.length > 0
           ? (currentCount - baselineCount) / standardDeviation
           : 0,
+      currentDistinctChatters: current.distinctChatters,
+      baselineDistinctChatters,
+      chatterStandardDeviation,
+      chatterScore:
+        baselineSamples.length > 0
+          ? (current.distinctChatters - baselineDistinctChatters) /
+            chatterStandardDeviation
+          : 0,
+      chatterDataCoverage: Math.min(currentCoverage, baselineCoverage),
       baselineSamples: baselineSamples.length
     };
   }
@@ -299,23 +372,35 @@ export class VelocityEngine {
 
       return (
         window.score >= scoreThreshold &&
-        window.currentCount >= Math.ceil(thresholdCount)
+        window.currentCount >= Math.ceil(thresholdCount) &&
+        this.hasDistinctChatterConfirmation(window)
       );
     });
+  }
+
+  private hasDistinctChatterConfirmation(window: WindowEvaluation): boolean {
+    if (
+      window.chatterDataCoverage < CHATTER_DATA_COVERAGE_RATIO ||
+      window.baselineDistinctChatters < MIN_BASELINE_DISTINCT_CHATTERS
+    ) {
+      return true;
+    }
+
+    return window.chatterScore >= DISTINCT_CHATTER_CONFIRMATION_SCORE;
   }
 
   private getBaselineSamples(
     state: ChannelVelocityState,
     now: number,
     windowMs: VelocityWindowMs
-  ): number[] {
+  ): WindowCounts[] {
     const currentBucketStartedAt = this.getBucketStartedAt(now);
     const earliestSampleStartedAt = Math.max(
       this.getBucketStartedAt(state.baselineStartedAt),
       currentBucketStartedAt - BASELINE_LOOKBACK_MS
     );
     const windowBucketCount = windowMs / VELOCITY_BUCKET_MS;
-    const samples: number[] = [];
+    const samples: WindowCounts[] = [];
 
     for (
       let sampleEndedAt = currentBucketStartedAt - BASELINE_EXCLUSION_MS;
@@ -324,7 +409,7 @@ export class VelocityEngine {
       sampleEndedAt -= windowMs
     ) {
       samples.push(
-        this.countBuckets(
+        this.countBucketStats(
           state,
           sampleEndedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS,
           sampleEndedAt
@@ -340,10 +425,18 @@ export class VelocityEngine {
     now: number,
     windowMs: number
   ): number {
+    return this.countWindowStats(state, now, windowMs).messageCount;
+  }
+
+  private countWindowStats(
+    state: ChannelVelocityState,
+    now: number,
+    windowMs: number
+  ): WindowCounts {
     const currentBucketStartedAt = this.getBucketStartedAt(now);
     const windowBucketCount = windowMs / VELOCITY_BUCKET_MS;
 
-    return this.countBuckets(
+    return this.countBucketStats(
       state,
       currentBucketStartedAt - (windowBucketCount - 1) * VELOCITY_BUCKET_MS,
       currentBucketStartedAt
@@ -355,17 +448,44 @@ export class VelocityEngine {
     firstBucketStartedAt: number,
     lastBucketStartedAt: number
   ): number {
-    let count = 0;
+    return this.countBucketStats(
+      state,
+      firstBucketStartedAt,
+      lastBucketStartedAt
+    ).messageCount;
+  }
+
+  private countBucketStats(
+    state: ChannelVelocityState,
+    firstBucketStartedAt: number,
+    lastBucketStartedAt: number
+  ): WindowCounts {
+    let messageCount = 0;
+    let identifiedMessageCount = 0;
+    const chatterUserIds = new Set<string>();
 
     for (
       let bucketStartedAt = firstBucketStartedAt;
       bucketStartedAt <= lastBucketStartedAt;
       bucketStartedAt += VELOCITY_BUCKET_MS
     ) {
-      count += state.buckets.get(bucketStartedAt)?.messageCount ?? 0;
+      const bucket = state.buckets.get(bucketStartedAt);
+      if (!bucket) {
+        continue;
+      }
+
+      messageCount += bucket.messageCount;
+      identifiedMessageCount += bucket.identifiedMessageCount;
+      for (const chatterUserId of bucket.chatterUserIds) {
+        chatterUserIds.add(chatterUserId);
+      }
     }
 
-    return count;
+    return {
+      messageCount,
+      identifiedMessageCount,
+      distinctChatters: chatterUserIds.size
+    };
   }
 
   private median(values: number[]): number {

@@ -18,12 +18,18 @@ function recordConstantRate(
   start: number,
   end: number,
   messagesPerSecond: number,
-  prefix: string
+  prefix: string,
+  chatterUserIdAt?: (index: number, time: number) => string
 ): void {
   const intervalMs = 1000 / messagesPerSecond;
 
   for (let time = start, index = 0; time < end; time += intervalMs, index += 1) {
-    engine.recordMessage(login, `${prefix}-${index}`, time);
+    engine.recordMessage(
+      login,
+      `${prefix}-${index}`,
+      time,
+      chatterUserIdAt?.(index, time)
+    );
   }
 }
 
@@ -206,5 +212,73 @@ describe("VelocityEngine", () => {
 
     expect(surge.shouldNotify).toBe(true);
     expect(surge.spikeScore).toBeGreaterThanOrEqual(2.5);
+  });
+
+  it("confirms a high-volume surge when distinct chatter participation rises", () => {
+    const engine = new VelocityEngine();
+    const login = "crowd";
+
+    recordConstantRate(
+      engine,
+      login,
+      0,
+      360_000,
+      20,
+      "baseline",
+      (index) => `baseline-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      30,
+      "surge",
+      (index) => `surge-user-${index}`
+    );
+
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(result.shouldNotify).toBe(true);
+    expect(result.chatterScore).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("suppresses a high-volume message surge dominated by one chatter", () => {
+    const engine = new VelocityEngine();
+    const login = "spam";
+
+    recordConstantRate(
+      engine,
+      login,
+      0,
+      360_000,
+      20,
+      "baseline",
+      (index) => `baseline-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      20,
+      "normal",
+      (index) => `normal-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      10,
+      "spam",
+      () => "single-spammer"
+    );
+
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(result.spikeScore).toBeGreaterThanOrEqual(2.5);
+    expect(result.chatterScore).toBeLessThan(0.75);
+    expect(result.shouldNotify).toBe(false);
   });
 });

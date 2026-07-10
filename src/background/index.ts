@@ -744,7 +744,8 @@ async function handleChatNotification(
   const recorded = velocity.recordMessage(
     channel.login,
     message.payload.event.message_id || message.metadata.message_id,
-    now
+    now,
+    message.payload.event.chatter_user_id
   );
 
   if (!recorded) {
