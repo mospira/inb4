@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "traceId": "example-short-trace",
+  "datasetVersion": "example-v1",
+  "phase": "development",
+  "channelLogin": "example",
+  "sensitivity": "high",
+  "cooldownSeconds": 60,
+  "labelMatchWindowMs": 30000,
+  "buckets": [
+    {
+      "startedAt": 0,
+      "messageCount": 2,
+      "chatterTokens": ["session-user-a", "session-user-b"],
+      "covered": true
+    },
+    {
+      "startedAt": 1000,
+      "messageCount": 1,
+      "chatterTokens": ["session-user-a"],
+      "covered": true
+    },
+    {
+      "startedAt": 2000,
+      "messageCount": 0,
+      "covered": false
+    },
+    {
+      "startedAt": 3000,
+      "messageCount": 1,
+      "chatterTokens": ["session-user-c"],
+      "covered": true
+    },
+    {
+      "startedAt": 4000,
+      "messageCount": 1,
+      "chatterTokens": ["session-user-d"],
+      "covered": true
+    }
+  ],
+  "labels": []
+}
