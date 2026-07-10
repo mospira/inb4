@@ -132,6 +132,20 @@ describe("VelocityEngine", () => {
     expect(snapshot.shortCount).toBe(1);
   });
 
+  it("retains duplicate protection beyond the old 500-message cap", () => {
+    const engine = new VelocityEngine();
+    expect(engine.recordMessage("busy", "original", 0)).toBe(true);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      engine.recordMessage("busy", `filler-${index}`, index + 1);
+    }
+
+    expect(engine.recordMessage("busy", "original", 60_000)).toBe(false);
+    expect(engine.recordMessage("busy", "original", 10 * 60_000 + 1)).toBe(
+      true
+    );
+  });
+
   it("updates the robust rolling baseline after sustained quiet", () => {
     const engine = new VelocityEngine();
     const login = "summit1g";
@@ -325,6 +339,7 @@ describe("VelocityEngine", () => {
     const serialized = JSON.stringify(engine.exportState(1_000));
 
     expect(serialized).not.toContain("sensitive-chatter-id");
+    expect(serialized).not.toContain("message-id");
   });
 
   it("rejects malformed and stale velocity checkpoints", () => {
@@ -334,7 +349,7 @@ describe("VelocityEngine", () => {
     expect(
       engine.importState(
         {
-          version: 1,
+          version: 2,
           savedAt: 0,
           channels: [null],
           coverageGaps: []

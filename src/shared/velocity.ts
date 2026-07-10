@@ -5,9 +5,10 @@ import {
   COLD_START_MS,
   DEFAULT_SETTINGS,
   DISTINCT_CHATTER_CONFIRMATION_SCORE,
+  DUPLICATE_MESSAGE_RETENTION_MS,
   EMERGENCY_MESSAGES_PER_MINUTE,
   EMERGENCY_WINDOW_MS,
-  MAX_DUPLICATE_IDS,
+  MAX_DUPLICATE_MESSAGE_TOKENS,
   MAX_TRACKED_CHANNELS,
   MIN_BASELINE_DISTINCT_CHATTERS,
   MIN_BASELINE_WINDOWS,
@@ -33,10 +34,16 @@ interface VelocityBucket {
 
 interface ChannelVelocityState {
   buckets: Map<number, VelocityBucket>;
-  seenMessageIds: string[];
-  seenMessageIdSet: Set<string>;
+  seenMessages: SeenMessage[];
+  seenMessageHead: number;
+  seenMessageTokenSet: Set<string>;
   baselineStartedAt: number;
   spikeActive: boolean;
+}
+
+interface SeenMessage {
+  token: string;
+  seenAt: number;
 }
 
 interface WindowEvaluation {
@@ -75,7 +82,7 @@ export interface VelocityEngineCheckpoint {
       startedAt: number;
       messageCount: number;
     }>;
-    seenMessageIds: string[];
+    seenMessages: SeenMessage[];
   }>;
   coverageGaps: CoverageGap[];
 }
@@ -115,25 +122,30 @@ export class VelocityEngine {
     channelLogin: string,
     messageId: string,
     now = Date.now(),
-    chatterUserId = ""
+    chatterUserId = "",
+    receivedAt = now
   ): boolean {
     const state = this.getState(channelLogin, now);
     state.baselineStartedAt = Math.min(state.baselineStartedAt, now);
-
-    if (messageId && state.seenMessageIdSet.has(messageId)) {
-      return false;
-    }
+    this.pruneSeenMessages(state, receivedAt);
 
     if (messageId) {
-      state.seenMessageIds.push(messageId);
-      state.seenMessageIdSet.add(messageId);
-
-      while (state.seenMessageIds.length > MAX_DUPLICATE_IDS) {
-        const oldId = state.seenMessageIds.shift();
-        if (oldId) {
-          state.seenMessageIdSet.delete(oldId);
-        }
+      const messageToken = this.createMessageToken(messageId);
+      if (state.seenMessageTokenSet.has(messageToken)) {
+        return false;
       }
+
+      state.seenMessages.push({ token: messageToken, seenAt: receivedAt });
+      state.seenMessageTokenSet.add(messageToken);
+      while (
+        state.seenMessages.length - state.seenMessageHead >
+        MAX_DUPLICATE_MESSAGE_TOKENS
+      ) {
+        const oldest = state.seenMessages[state.seenMessageHead];
+        state.seenMessageHead += 1;
+        state.seenMessageTokenSet.delete(oldest.token);
+      }
+      this.compactSeenMessages(state);
     }
 
     const bucketStartedAt = this.getBucketStartedAt(now);
@@ -283,7 +295,9 @@ export class VelocityEngine {
           startedAt: bucket.startedAt,
           messageCount: bucket.messageCount
         })),
-        seenMessageIds: [...state.seenMessageIds]
+        seenMessages: state.seenMessages
+          .slice(state.seenMessageHead)
+          .map((message) => ({ ...message }))
       })),
       coverageGaps: this.coverageGaps.map((gap) => ({ ...gap }))
     };
@@ -305,7 +319,7 @@ export class VelocityEngine {
         channel.login.length > 100 ||
         !Number.isFinite(channel.baselineStartedAt) ||
         !Array.isArray(channel.buckets) ||
-        !Array.isArray(channel.seenMessageIds)
+        !Array.isArray(channel.seenMessages)
       ) {
         continue;
       }
@@ -333,19 +347,28 @@ export class VelocityEngine {
         });
       }
 
-      const seenMessageIds = channel.seenMessageIds
+      const seenMessages = channel.seenMessages
         .filter(
-          (messageId): messageId is string =>
-            typeof messageId === "string" &&
-            messageId.length > 0 &&
-            messageId.length <= 256
+          (message): message is SeenMessage =>
+            this.isRecord(message) &&
+            typeof message.token === "string" &&
+            message.token.length > 0 &&
+            message.token.length <= 32 &&
+            typeof message.seenAt === "number" &&
+            Number.isFinite(message.seenAt) &&
+            message.seenAt >= now - DUPLICATE_MESSAGE_RETENTION_MS &&
+            message.seenAt <= now + VELOCITY_BUCKET_MS
         )
-        .slice(-MAX_DUPLICATE_IDS);
+        .slice(-MAX_DUPLICATE_MESSAGE_TOKENS)
+        .map((message) => ({ ...message }));
 
       this.states.set(channel.login, {
         buckets,
-        seenMessageIds,
-        seenMessageIdSet: new Set(seenMessageIds),
+        seenMessages,
+        seenMessageHead: 0,
+        seenMessageTokenSet: new Set(
+          seenMessages.map((message) => message.token)
+        ),
         baselineStartedAt: Math.min(channel.baselineStartedAt, now),
         spikeActive: channel.spikeActive === true
       });
@@ -393,8 +416,9 @@ export class VelocityEngine {
 
     const created: ChannelVelocityState = {
       buckets: new Map(),
-      seenMessageIds: [],
-      seenMessageIdSet: new Set(),
+      seenMessages: [],
+      seenMessageHead: 0,
+      seenMessageTokenSet: new Set(),
       baselineStartedAt: now,
       spikeActive: false
     };
@@ -410,6 +434,46 @@ export class VelocityEngine {
         state.buckets.delete(bucketStartedAt);
       }
     }
+  }
+
+  private pruneSeenMessages(state: ChannelVelocityState, now: number): void {
+    const oldestAllowedAt = now - DUPLICATE_MESSAGE_RETENTION_MS;
+
+    while (
+      state.seenMessageHead < state.seenMessages.length &&
+      state.seenMessages[state.seenMessageHead].seenAt < oldestAllowedAt
+    ) {
+      const expired = state.seenMessages[state.seenMessageHead];
+      state.seenMessageHead += 1;
+      state.seenMessageTokenSet.delete(expired.token);
+    }
+
+    this.compactSeenMessages(state);
+  }
+
+  private compactSeenMessages(state: ChannelVelocityState): void {
+    if (
+      state.seenMessageHead < 1_000 ||
+      state.seenMessageHead * 2 < state.seenMessages.length
+    ) {
+      return;
+    }
+
+    state.seenMessages = state.seenMessages.slice(state.seenMessageHead);
+    state.seenMessageHead = 0;
+  }
+
+  private createMessageToken(messageId: string): string {
+    let first = 0x811c9dc5;
+    let second = 0x9e3779b9;
+
+    for (let index = 0; index < messageId.length; index += 1) {
+      const code = messageId.charCodeAt(index);
+      first = Math.imul(first ^ code, 0x01000193);
+      second = Math.imul(second ^ code, 0x85ebca6b);
+    }
+
+    return `${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
   }
 
   private getSnapshotFromState(

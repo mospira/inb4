@@ -831,7 +831,8 @@ async function handleChatNotification(
     channel.login,
     message.payload.event.message_id || message.metadata.message_id,
     eventTimestamp,
-    message.payload.event.chatter_user_id
+    message.payload.event.chatter_user_id,
+    now
   );
 
   if (!recorded) {
