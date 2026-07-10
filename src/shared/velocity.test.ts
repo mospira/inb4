@@ -359,4 +359,38 @@ describe("VelocityEngine", () => {
     ).toBe(true);
     expect(engine.getSnapshot("fresh", "high", 1_000).baselineReady).toBe(false);
   });
+
+  it("deduplicates restored message tokens using their newest receipt time", () => {
+    const original = new VelocityEngine();
+    original.recordMessage("busy", "same-message", 0);
+    const checkpoint = original.exportState(400_000);
+    const seenMessage = checkpoint.channels[0].seenMessages[0];
+    checkpoint.channels[0].seenMessages.push({
+      ...seenMessage,
+      seenAt: 300_000
+    });
+
+    const restored = new VelocityEngine();
+    expect(restored.importState(checkpoint, 400_000)).toBe(true);
+    expect(
+      restored.recordMessage("busy", "same-message", 600_001)
+    ).toBe(false);
+  });
+
+  it("ignores additional malformed open gaps in restored state", () => {
+    const original = new VelocityEngine();
+    original.markUnavailable(100_000);
+    const checkpoint = original.exportState(300_000);
+    checkpoint.coverageGaps.push({ startedAt: 200_000 });
+
+    const restored = new VelocityEngine();
+    expect(restored.importState(checkpoint, 300_000)).toBe(true);
+    restored.markAvailable(300_000);
+
+    expect(
+      restored
+        .exportState(300_000)
+        .coverageGaps.every((gap) => gap.endedAt !== undefined)
+    ).toBe(true);
+  });
 });

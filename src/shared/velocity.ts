@@ -347,7 +347,7 @@ export class VelocityEngine {
         });
       }
 
-      const seenMessages = channel.seenMessages
+      const seenMessageCandidates = channel.seenMessages
         .filter(
           (message): message is SeenMessage =>
             this.isRecord(message) &&
@@ -359,8 +359,17 @@ export class VelocityEngine {
             message.seenAt >= now - DUPLICATE_MESSAGE_RETENTION_MS &&
             message.seenAt <= now + VELOCITY_BUCKET_MS
         )
-        .slice(-MAX_DUPLICATE_MESSAGE_TOKENS)
         .map((message) => ({ ...message }));
+      const seenMessagesByToken = new Map<string, SeenMessage>();
+      for (const message of seenMessageCandidates) {
+        const existing = seenMessagesByToken.get(message.token);
+        if (!existing || message.seenAt > existing.seenAt) {
+          seenMessagesByToken.set(message.token, message);
+        }
+      }
+      const seenMessages = Array.from(seenMessagesByToken.values())
+        .sort((left, right) => left.seenAt - right.seenAt)
+        .slice(-MAX_DUPLICATE_MESSAGE_TOKENS);
 
       this.states.set(channel.login, {
         buckets,
@@ -392,6 +401,9 @@ export class VelocityEngine {
           ? { endedAt: Math.min(candidate.endedAt, now) }
           : {})
       };
+      if (gap.endedAt === undefined && this.openCoverageGap) {
+        continue;
+      }
       this.coverageGaps.push(gap);
       if (gap.endedAt === undefined && !this.openCoverageGap) {
         this.openCoverageGap = gap;
