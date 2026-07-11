@@ -1,7 +1,6 @@
 import {
   AUTH_VALIDATE_ALARM,
   COLD_START_MS,
-  CLIP_CONFIRMATION_MIN_COUNT,
   CLIP_POLL_ALARM,
   CLIP_POLL_INTERVAL_MINUTES,
   CLIP_POLL_LOOKBACK_MS,
@@ -54,6 +53,7 @@ import {
 } from "./twitchAuth";
 import { parseNotificationLogin } from "./notifications";
 import { notifySpikeWithOptionalClip } from "./spikeNotification";
+import { hasRequiredSpikeConfirmation } from "./spikeConfirmation";
 import { waitForClipAvailability } from "./clipVerification";
 import {
   createNotificationClipLink,
@@ -929,18 +929,21 @@ async function maybeNotifyForChannel(
 
   const clipSnapshot = clipSignals.getSnapshot(channel.login, now);
   const pending = getPendingChatConfirmation(channel.login, now);
-  const clipConfirmed =
-    Boolean(pending) &&
-    clipSnapshot.recentClipCount >= CLIP_CONFIRMATION_MIN_COUNT &&
-    !trigger.spikeActive &&
-    notificationCooldownElapsed(channel, stored.settings, now);
+  const clipConfirmed = hasRequiredSpikeConfirmation({
+    baselineReady: trigger.baselineReady,
+    startupWarmupActive: startupWarmup.isActive(now),
+    notificationsEnabled: stored.settings.notificationsEnabled,
+    hasPendingChatConfirmation: Boolean(pending),
+    recentClipCount: clipSnapshot.recentClipCount,
+    spikeActive: trigger.spikeActive,
+    notificationCooldownElapsed: notificationCooldownElapsed(
+      channel,
+      stored.settings,
+      now
+    )
+  });
 
-  if (
-    !trigger.baselineReady ||
-    startupWarmup.isActive(now) ||
-    !stored.settings.notificationsEnabled ||
-    (!trigger.shouldNotify && !clipConfirmed)
-  ) {
+  if (!clipConfirmed) {
     return;
   }
 

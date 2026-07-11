@@ -27,8 +27,8 @@
 2. `inb4` subscribes to Twitch chat events through EventSub.
 3. The extension groups chat into one-second buckets and learns a robust five-minute baseline that excludes the most recent 30 seconds.
 4. It scores 3, 8, 20, and 30-second windows, confirms high-volume reactions with distinct chatter participation across two nearby one-second buckets when possible, and ignores periods where EventSub coverage was unavailable.
-5. When activity rises far enough above that baseline, `inb4` sends a notification, subject to the configured cooldown.
-6. If optional clip creation is enabled, the extension can request a Twitch clip alongside the alert.
+5. When activity rises far enough above that baseline, `inb4` waits for at least one Twitch clip created within the recent confirmation window before sending a notification, subject to the configured cooldown.
+6. If optional clip creation is enabled, the extension can request an additional Twitch clip alongside the alert.
 
 The background process is designed for Chrome Manifest V3 and uses alarms to recover from service-worker suspension and EventSub interruptions. Compact count-based detector state is checkpointed to Chrome session storage so an ordinary service-worker restart does not force a complete baseline relearn.
 
