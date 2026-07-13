@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "inb4",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Notify when tracked Twitch chats spike in message velocity.",
   "minimum_chrome_version": "120",
   "action": {
@@ -19,7 +19,12 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["identity", "notifications", "storage", "alarms"],
+  "permissions": [
+    "identity",
+    "notifications",
+    "storage",
+    "alarms"
+  ],
   "host_permissions": [
     "https://id.twitch.tv/*",
     "https://api.twitch.tv/*"
