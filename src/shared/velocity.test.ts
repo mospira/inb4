@@ -12,6 +12,50 @@ function warmBaseline(engine: VelocityEngine, login: string, start = 0): void {
   }
 }
 
+function recordConstantRate(
+  engine: VelocityEngine,
+  login: string,
+  start: number,
+  end: number,
+  messagesPerSecond: number,
+  prefix: string,
+  chatterUserIdAt?: (index: number, time: number) => string
+): void {
+  const intervalMs = 1000 / messagesPerSecond;
+
+  for (let time = start, index = 0; time < end; time += intervalMs, index += 1) {
+    engine.recordMessage(
+      login,
+      `${prefix}-${index}`,
+      time,
+      chatterUserIdAt?.(index, time)
+    );
+  }
+}
+
+function recordVariableRate(
+  engine: VelocityEngine,
+  login: string,
+  start: number,
+  end: number,
+  messagesPerSecondAt: (time: number) => number,
+  prefix: string
+): void {
+  const stepMs = 100;
+  let pendingMessages = 0;
+  let index = 0;
+
+  for (let time = start; time < end; time += stepMs) {
+    pendingMessages += (messagesPerSecondAt(time) * stepMs) / 1000;
+
+    while (pendingMessages >= 1) {
+      engine.recordMessage(login, `${prefix}-${index}`, time);
+      pendingMessages -= 1;
+      index += 1;
+    }
+  }
+}
+
 describe("VelocityEngine", () => {
   it("suppresses normal threshold notifications during cold start", () => {
     const engine = new VelocityEngine();
@@ -88,7 +132,21 @@ describe("VelocityEngine", () => {
     expect(snapshot.shortCount).toBe(1);
   });
 
-  it("updates the adaptive EMA baseline gradually", () => {
+  it("retains duplicate protection beyond the old 500-message cap", () => {
+    const engine = new VelocityEngine();
+    expect(engine.recordMessage("busy", "original", 0)).toBe(true);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      engine.recordMessage("busy", `filler-${index}`, index + 1);
+    }
+
+    expect(engine.recordMessage("busy", "original", 60_000)).toBe(false);
+    expect(engine.recordMessage("busy", "original", 10 * 60_000 + 1)).toBe(
+      true
+    );
+  });
+
+  it("updates the robust rolling baseline after sustained quiet", () => {
     const engine = new VelocityEngine();
     const login = "summit1g";
 
@@ -134,5 +192,223 @@ describe("VelocityEngine", () => {
       16 * 60_000
     );
     expect(snapshot.shortCount).toBe(1);
+  });
+
+  it("detects a five-second surge in high-volume chat with a short window", () => {
+    const engine = new VelocityEngine();
+    const login = "busy";
+
+    recordConstantRate(engine, login, 0, 360_000, 20, "baseline");
+    recordConstantRate(engine, login, 360_000, 365_000, 30, "surge");
+
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(result.baselineMessagesPerMinute).toBeGreaterThan(1_100);
+    expect(result.shouldNotify).toBe(true);
+    expect([3_000, 8_000]).toContain(result.spikeWindowMs);
+  });
+
+  it("keeps natural high-volume rate cycling from hiding a sharp surge", () => {
+    const engine = new VelocityEngine();
+    const login = "variable";
+    const naturalRate = (time: number): number =>
+      20 * (1 + 0.2 * Math.sin((2 * Math.PI * time) / 90_000));
+
+    recordVariableRate(engine, login, 0, 360_000, naturalRate, "baseline");
+
+    const normal = engine.evaluate(login, "high", 0, 359_999, undefined, {
+      commitSpike: false
+    });
+    expect(normal.shouldNotify).toBe(false);
+
+    recordConstantRate(engine, login, 360_000, 365_000, 40, "surge");
+    const surge = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(surge.shouldNotify).toBe(true);
+    expect(surge.spikeScore).toBeGreaterThanOrEqual(2.5);
+  });
+
+  it("confirms a high-volume surge when distinct chatter participation rises", () => {
+    const engine = new VelocityEngine();
+    const login = "crowd";
+
+    recordConstantRate(
+      engine,
+      login,
+      0,
+      360_000,
+      20,
+      "baseline",
+      (index) => `baseline-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      30,
+      "surge",
+      (index) => `surge-user-${index}`
+    );
+
+    const firstCandidate = engine.evaluate(
+      login,
+      "high",
+      0,
+      363_999,
+      undefined,
+      { commitSpike: false }
+    );
+    const repeatedCandidate = engine.evaluate(
+      login,
+      "high",
+      0,
+      363_999,
+      undefined,
+      { commitSpike: false }
+    );
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(firstCandidate.shouldNotify).toBe(false);
+    expect(repeatedCandidate.shouldNotify).toBe(false);
+    expect(result.shouldNotify).toBe(true);
+    expect(result.chatterScore).toBeGreaterThanOrEqual(0.75);
+  });
+
+  it("suppresses a high-volume message surge dominated by one chatter", () => {
+    const engine = new VelocityEngine();
+    const login = "spam";
+
+    recordConstantRate(
+      engine,
+      login,
+      0,
+      360_000,
+      20,
+      "baseline",
+      (index) => `baseline-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      20,
+      "normal",
+      (index) => `normal-user-${index}`
+    );
+    recordConstantRate(
+      engine,
+      login,
+      360_000,
+      365_000,
+      10,
+      "spam",
+      () => "single-spammer"
+    );
+
+    const result = engine.evaluate(login, "high", 0, 364_999);
+
+    expect(result.spikeScore).toBeGreaterThanOrEqual(2.5);
+    expect(result.chatterScore).toBeLessThan(0.75);
+    expect(result.shouldNotify).toBe(false);
+  });
+
+  it("treats connection gaps as missing coverage instead of quiet chat", () => {
+    const engine = new VelocityEngine();
+    const login = "reconnecting";
+
+    recordConstantRate(engine, login, 0, 360_000, 20, "baseline");
+    engine.markUnavailable(360_000);
+
+    const disconnected = engine.evaluate(login, "high", 0, 389_999);
+    expect(disconnected.baselineReady).toBe(false);
+    expect(disconnected.shouldNotify).toBe(false);
+
+    engine.markAvailable(390_000);
+    recordConstantRate(engine, login, 390_000, 425_000, 20, "resumed");
+
+    const resumed = engine.evaluate(login, "high", 0, 424_999);
+    expect(resumed.baselineReady).toBe(true);
+    expect(resumed.baselineMessagesPerMinute).toBeGreaterThan(1_100);
+    expect(resumed.shouldNotify).toBe(false);
+  });
+
+  it("restores a warm message-count baseline from a compact checkpoint", () => {
+    const original = new VelocityEngine();
+    const restored = new VelocityEngine();
+    const login = "restored";
+
+    recordConstantRate(original, login, 0, 360_000, 20, "baseline");
+    const checkpoint = original.exportState(360_000);
+
+    expect(restored.importState(checkpoint, 360_000)).toBe(true);
+    recordConstantRate(restored, login, 360_000, 365_000, 30, "surge");
+
+    const result = restored.evaluate(login, "high", 0, 364_999);
+    expect(result.baselineReady).toBe(true);
+    expect(result.shouldNotify).toBe(true);
+  });
+
+  it("does not persist chatter identifiers in velocity checkpoints", () => {
+    const engine = new VelocityEngine();
+    engine.recordMessage("private", "message-id", 1_000, "sensitive-chatter-id");
+
+    const serialized = JSON.stringify(engine.exportState(1_000));
+
+    expect(serialized).not.toContain("sensitive-chatter-id");
+    expect(serialized).not.toContain("message-id");
+  });
+
+  it("rejects malformed and stale velocity checkpoints", () => {
+    const engine = new VelocityEngine();
+
+    expect(engine.importState({ version: 99 }, 1_000)).toBe(false);
+    expect(
+      engine.importState(
+        {
+          version: 2,
+          savedAt: 0,
+          channels: [null],
+          coverageGaps: []
+        },
+        1_000
+      )
+    ).toBe(true);
+    expect(engine.getSnapshot("fresh", "high", 1_000).baselineReady).toBe(false);
+  });
+
+  it("deduplicates restored message tokens using their newest receipt time", () => {
+    const original = new VelocityEngine();
+    original.recordMessage("busy", "same-message", 0);
+    const checkpoint = original.exportState(400_000);
+    const seenMessage = checkpoint.channels[0].seenMessages[0];
+    checkpoint.channels[0].seenMessages.push({
+      ...seenMessage,
+      seenAt: 300_000
+    });
+
+    const restored = new VelocityEngine();
+    expect(restored.importState(checkpoint, 400_000)).toBe(true);
+    expect(
+      restored.recordMessage("busy", "same-message", 600_001)
+    ).toBe(false);
+  });
+
+  it("ignores additional malformed open gaps in restored state", () => {
+    const original = new VelocityEngine();
+    original.markUnavailable(100_000);
+    const checkpoint = original.exportState(300_000);
+    checkpoint.coverageGaps.push({ startedAt: 200_000 });
+
+    const restored = new VelocityEngine();
+    expect(restored.importState(checkpoint, 300_000)).toBe(true);
+    restored.markAvailable(300_000);
+
+    expect(
+      restored
+        .exportState(300_000)
+        .coverageGaps.every((gap) => gap.endedAt !== undefined)
+    ).toBe(true);
   });
 });

@@ -19,7 +19,8 @@
 
 ## Highlights
 
-- **Adaptive spike detection:** Compares recent chat activity with a rolling per-channel baseline.
+- **Robust multi-scale detection:** Compares 3, 8, 20, and 30-second chat activity with a lagged, rolling per-channel baseline.
+- **Crowd confirmation:** Uses distinct chatter participation and short persistence to distinguish broad reactions from single-user floods or one-bucket delivery noise when enough chatter data is available.
 - **Up to 10 channels:** Track several Twitch communities from one extension.
 - **Adjustable sensitivity:** Choose a global sensitivity and override it per channel.
 - **Desktop notifications:** Jump back when chat suggests something worth seeing is happening.
@@ -31,11 +32,12 @@
 
 1. You connect a Twitch account and add channels to track.
 2. `inb4` subscribes to Twitch chat events through EventSub.
-3. The extension measures recent message velocity and builds a rolling baseline for each channel.
-4. When activity rises far enough above that baseline, `inb4` sends a notification, subject to the configured cooldown.
-5. If optional clip creation is enabled, the extension can request a Twitch clip alongside the alert.
+3. The extension groups chat into one-second buckets and learns a robust five-minute baseline that excludes the most recent 30 seconds.
+4. It scores 3, 8, 20, and 30-second windows, confirms high-volume reactions with distinct chatter participation across two nearby one-second buckets when possible, and ignores periods where EventSub coverage was unavailable.
+5. When activity rises far enough above that baseline, `inb4` waits for at least one Twitch clip created within the recent confirmation window before sending a notification, subject to the configured cooldown.
+6. If optional clip creation is enabled, the extension can request an additional Twitch clip alongside the alert.
 
-The background process is designed for Chrome Manifest V3 and uses alarms to recover from service-worker suspension and EventSub interruptions.
+The background process is designed for Chrome Manifest V3 and uses alarms to recover from service-worker suspension and EventSub interruptions. Compact count-based detector state is checkpointed to Chrome session storage so an ordinary service-worker restart does not force a complete baseline relearn.
 
 ## Install from source
 
@@ -104,6 +106,8 @@ Host access is limited to Twitch authentication, API, image, and EventSub endpoi
 
 The locally stored Twitch access token is sensitive. You can disconnect Twitch or use **Clear local data** from the options page to remove extension data from the current Chrome profile.
 
+Distinct-chatter analysis is performed in service-worker memory. Raw chatter IDs and message text are not written to the detector checkpoint; the channel login, bucket counts, hashed message-deduplication tokens, coverage gaps, and detector state are kept in Chrome session storage. Session detector data is also removed by **Clear local data**.
+
 Before a Chrome Web Store release, the project still needs appropriate store privacy disclosures and a published privacy policy covering the locally stored token, tracked-channel metadata, notifications, and optional clip creation.
 
 ## Development
@@ -120,9 +124,14 @@ npm test
 
 # Run TypeScript checks only
 npm run typecheck
+
+# Replay an aggregate chronological detector trace
+npm run replay:velocity -- fixtures/velocity-replay.example.json
 ```
 
 The codebase uses TypeScript, Vite, Vitest, native DOM APIs, and Chrome extension APIs.
+
+See [Velocity replay](docs/velocity-replay.md) for the aggregate trace format, privacy constraints, chronological evaluation contract, and interpretation of replay metrics.
 
 ### CI and releases
 
@@ -148,6 +157,9 @@ src/popup/       Toolbar popup
 src/options/     Options page
 src/ui/          Shared UI rendering and styles
 public/          Manifest and extension icons
+scripts/         Local detector replay commands
+fixtures/        Aggregate replay examples and deterministic fixtures
+docs/            Development and evaluation documentation
 ```
 
 Build output in `dist/` is generated and should not be edited by hand.
