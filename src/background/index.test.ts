@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AUTH_VALIDATE_ALARM } from "../shared/constants";
-import type { StorageShape } from "../shared/types";
+import type { RuntimeCommand, RuntimeResponse, StorageShape } from "../shared/types";
 
 const apiMocks = vi.hoisted(() => ({
   createChatMessageSubscription: vi.fn(),
@@ -144,6 +144,29 @@ describe("background service worker", () => {
       "velocitySession"
     );
   });
+
+  it("rejects a channel that does not exist without storing it", async () => {
+    const storage = createStorage();
+    storage.channels = {};
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    await import("./index");
+
+    await expect(
+      chromeStub.emitMessage({ type: "ADD_CHANNEL", login: "missing_channel" })
+    ).resolves.toEqual({
+      ok: false,
+      error: "Channel doesn't exist.",
+      code: "not_found"
+    });
+    expect(apiMocks.resolveTwitchUser).toHaveBeenCalledWith(
+      "missing_channel",
+      expect.objectContaining({ accessToken: "token" })
+    );
+    expect(storage.channels).toEqual({});
+  });
 });
 
 function createStorage(): StorageShape {
@@ -181,6 +204,7 @@ function createChromeStub(storage: StorageShape): {
     create: ReturnType<typeof vi.fn>;
     onAlarm: { addListener: (listener: (alarm: { name: string }) => void) => void };
   };
+  emitMessage: (message: RuntimeCommand) => Promise<RuntimeResponse>;
   emitAlarm: (name: string) => Promise<void>;
   identity: { getRedirectURL: (path: string) => string };
   notifications: {
@@ -212,6 +236,13 @@ function createChromeStub(storage: StorageShape): {
   tabs: { create: ReturnType<typeof vi.fn> };
 } {
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
+  const messageListeners: Array<
+    (
+      message: RuntimeCommand,
+      sender: unknown,
+      sendResponse: (response: RuntimeResponse) => void
+    ) => boolean
+  > = [];
   const localStorage: Record<string, unknown> = {
     auth: storage.auth,
     channels: storage.channels,
@@ -234,6 +265,16 @@ function createChromeStub(storage: StorageShape): {
       }
       await Promise.resolve();
     },
+    emitMessage: (message: RuntimeCommand) =>
+      new Promise((resolve, reject) => {
+        const listener = messageListeners[0];
+        if (!listener) {
+          reject(new Error("No runtime message listener was registered."));
+          return;
+        }
+
+        listener(message, {}, resolve);
+      }),
     identity: {
       getRedirectURL: (path: string) => `https://example.chromiumapp.org/${path}`
     },
@@ -247,7 +288,11 @@ function createChromeStub(storage: StorageShape): {
       getURL: (path: string) => `chrome-extension://test/${path}`,
       lastError: undefined,
       onInstalled: { addListener: vi.fn() },
-      onMessage: { addListener: vi.fn() },
+      onMessage: {
+        addListener: vi.fn((listener) => {
+          messageListeners.push(listener);
+        })
+      },
       onStartup: { addListener: vi.fn() }
     },
     storage: {
