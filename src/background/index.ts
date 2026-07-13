@@ -358,10 +358,7 @@ async function addChannel(input: string): Promise<void> {
 
   const user = await resolveTwitchUser(login, auth);
   if (!user) {
-    throw new RuntimeCommandError(
-      `Twitch channel "${login}" was not found.`,
-      "not_found"
-    );
+    throw new RuntimeCommandError("Channel doesn't exist.", "not_found");
   }
 
   await mutateStorage((current) => {
