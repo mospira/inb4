@@ -17,15 +17,18 @@ type RawStorage = Partial<{
 }>;
 
 export function hydrateStorage(raw: RawStorage): StorageShape {
+  const settings = hydrateSettings(raw.settings);
+
   return {
     auth: raw.auth ?? null,
-    settings: hydrateSettings(raw.settings),
-    channels: hydrateChannels(raw.channels ?? {})
+    settings,
+    channels: hydrateChannels(raw.channels ?? {}, settings.globalSensitivity)
   };
 }
 
 function hydrateChannels(
-  channels: Record<string, ChannelConfig>
+  channels: Record<string, ChannelConfig>,
+  defaultSensitivity: Settings["globalSensitivity"]
 ): Record<string, ChannelConfig> {
   return Object.fromEntries(
     Object.entries(channels).map(([login, channel]) => [
@@ -40,13 +43,13 @@ function hydrateChannels(
           typeof channel.createClipsEnabled === "boolean"
             ? channel.createClipsEnabled
             : DEFAULT_SETTINGS.createClipsEnabled,
+        sensitivity: isSensitivityPresetName(channel.sensitivity)
+          ? channel.sensitivity
+          : defaultSensitivity,
         lastNotificationAt: channel.lastNotificationAt,
         status: channel.status,
         errorCode: channel.errorCode,
-        errorMessage: channel.errorMessage,
-        ...(isSensitivityPresetName(channel.sensitivity)
-          ? { sensitivity: channel.sensitivity }
-          : {})
+        errorMessage: channel.errorMessage
       }) satisfies ChannelConfig
     ])
   );

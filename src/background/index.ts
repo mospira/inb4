@@ -56,6 +56,10 @@ import { notifySpikeWithOptionalClip } from "./spikeNotification";
 import { hasRequiredSpikeConfirmation } from "./spikeConfirmation";
 import { waitForClipAvailability } from "./clipVerification";
 import {
+  requiresClipPermission,
+  shouldCreateNotificationClip
+} from "./clipSettings";
+import {
   createNotificationClipLink,
   pruneNotificationClipLinks,
   readNotificationClipUrl,
@@ -247,7 +251,7 @@ async function handleCommand(command: RuntimeCommand): Promise<PublicAppState> {
 
     case "CONNECT_TWITCH": {
       const stored = await loadStorage();
-      const auth = await connectTwitch(stored.settings.createClipsEnabled);
+      const auth = await connectTwitch(requiresClipPermission(stored));
       return completeTwitchConnect(auth);
     }
 
@@ -298,9 +302,9 @@ async function handleCommand(command: RuntimeCommand): Promise<PublicAppState> {
 
 async function completeTwitchConnect(auth: StoredAuth): Promise<PublicAppState> {
   const stored = await loadStorage();
-  if (stored.settings.createClipsEnabled && !hasClipEditScope(auth.scopes)) {
+  if (requiresClipPermission(stored) && !hasClipEditScope(auth.scopes)) {
     throw new RuntimeCommandError(
-      "Twitch did not grant clip permission. Disable automatic clips or reconnect with clip permission.",
+      "Twitch did not grant clip permission. Disable clip creation for every channel or reconnect with clip permission.",
       "auth_required"
     );
   }
@@ -317,7 +321,7 @@ async function getPublicState(): Promise<PublicAppState> {
   const channels: ChannelRuntimeSummary[] = Object.values(stored.channels)
     .sort((a, b) => a.login.localeCompare(b.login))
     .map((channel) => {
-      const sensitivity = effectiveSensitivity(channel, stored.settings);
+      const sensitivity = effectiveSensitivity(channel);
       const snapshot = velocity.getSnapshot(channel.login, sensitivity);
       const clipSnapshot = clipSignals.getSnapshot(channel.login);
 
@@ -387,7 +391,9 @@ async function addChannel(input: string): Promise<void> {
           createClipsEnabled:
             current.channels[user.login]?.createClipsEnabled ??
             current.settings.createClipsEnabled,
-          sensitivity: current.channels[user.login]?.sensitivity,
+          sensitivity:
+            current.channels[user.login]?.sensitivity ??
+            current.settings.globalSensitivity,
           lastNotificationAt: current.channels[user.login]?.lastNotificationAt,
           status: "connecting"
         } satisfies ChannelConfig
@@ -462,7 +468,7 @@ async function updateChannel(
       } else if (patch.sensitivity) {
         throw new RuntimeCommandError("Unknown sensitivity preset.", "validation");
       } else {
-        delete updated.sensitivity;
+        updated.sensitivity = stored.settings.globalSensitivity;
       }
     }
 
@@ -907,7 +913,7 @@ async function maybeNotifyForChannel(
   stored: StorageShape,
   now: number
 ): Promise<void> {
-  const sensitivity = effectiveSensitivity(channel, stored.settings);
+  const sensitivity = effectiveSensitivity(channel);
   const preset = SENSITIVITY_PRESETS[sensitivity];
   const trigger = velocity.evaluate(
     channel.login,
@@ -969,7 +975,7 @@ async function maybeNotifyForChannel(
 
     const notification = await notifySpikeWithOptionalClip({
       login: channel.login,
-      createClip: shouldCreateNotificationClip(channel, stored.settings, auth)
+      createClip: shouldCreateNotificationClip(channel, auth)
         ? () => createClipForNotification(channel, auth)
         : undefined
     });
@@ -993,18 +999,6 @@ async function maybeNotifyForChannel(
   } finally {
     notificationAttempts.delete(channel.login);
   }
-}
-
-function shouldCreateNotificationClip(
-  channel: ChannelConfig,
-  settings: Settings,
-  auth: StoredAuth
-): boolean {
-  return (
-    settings.createClipsEnabled &&
-    channel.createClipsEnabled &&
-    hasClipEditScope(auth.scopes)
-  );
 }
 
 async function createClipForNotification(
@@ -1224,15 +1218,10 @@ function coerceNotificationClipLinkStore(
 }
 
 function effectiveSensitivity(
-  channel: ChannelConfig,
-  settings: Settings
+  channel: ChannelConfig
 ): SensitivityPresetName {
   if (isSensitivityPresetName(channel.sensitivity)) {
     return channel.sensitivity;
-  }
-
-  if (isSensitivityPresetName(settings.globalSensitivity)) {
-    return settings.globalSensitivity;
   }
 
   return "medium";

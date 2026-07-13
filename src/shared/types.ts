@@ -39,7 +39,7 @@ export interface ChannelConfig {
   profileImageUrl?: string;
   enabled: boolean;
   createClipsEnabled: boolean;
-  sensitivity?: SensitivityPresetName;
+  sensitivity: SensitivityPresetName;
   lastNotificationAt?: number;
   status?: ChannelStatus;
   errorCode?: ChannelErrorCode;
