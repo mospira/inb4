@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/mospira/inb4/compare/v1.0.0...v1.1.0) (2026-07-13)
+
+
+### Features
+
+* enlarge and space logo text ([#8](https://github.com/mospira/inb4/issues/8)) ([6b797ec](https://github.com/mospira/inb4/commit/6b797ec66c383e6c36fe085f454dafd6baa1ade8))
+
 ## [1.0.0](https://github.com/mospira/inb4/compare/v0.1.0...v1.0.0) (2026-07-13)
 
 

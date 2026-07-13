@@ -1,6 +1,6 @@
 {
   "name": "inb4",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "A Chrome extension that notifies when Twitch chat velocity spikes.",
