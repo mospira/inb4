@@ -22,9 +22,9 @@
 - **Robust multi-scale detection:** Compares 3, 8, 20, and 30-second chat activity with a lagged, rolling per-channel baseline.
 - **Crowd confirmation:** Uses distinct chatter participation and short persistence to distinguish broad reactions from single-user floods or one-bucket delivery noise when enough chatter data is available.
 - **Up to 10 channels:** Track several Twitch communities from one extension.
-- **Adjustable sensitivity:** Choose a global sensitivity and override it per channel.
+- **Adjustable sensitivity:** Choose the default for newly added channels, then configure each channel independently.
 - **Desktop notifications:** Jump back when chat suggests something worth seeing is happening.
-- **Optional clip creation:** With additional Twitch permission, create a clip when a spike is detected.
+- **Optional clip creation:** Set the default for new channels, then enable or disable clip creation independently per channel with additional Twitch permission.
 - **Live status:** View message rate, baseline activity, connection health, and the last alert in the popup.
 - **Local-first storage:** Settings, tracked channels, and Twitch authorization data stay in Chrome's local extension storage.
 

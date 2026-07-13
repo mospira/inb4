@@ -167,6 +167,66 @@ describe("background service worker", () => {
     );
     expect(storage.channels).toEqual({});
   });
+
+  it("copies defaults into a new channel without changing it later", async () => {
+    const storage = createStorage();
+    storage.channels = {};
+    storage.settings.globalSensitivity = "high";
+    storage.settings.createClipsEnabled = true;
+    storage.auth!.scopes.push("clips:edit");
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    apiMocks.resolveTwitchUser.mockResolvedValue({
+      id: "456",
+      login: "newchannel",
+      display_name: "NewChannel",
+      profile_image_url: "https://static-cdn.jtvnw.net/newchannel.png"
+    });
+
+    await import("./index");
+
+    await expect(
+      chromeStub.emitMessage({ type: "ADD_CHANNEL", login: "newchannel" })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        channels: [
+          expect.objectContaining({
+            login: "newchannel",
+            sensitivity: "high",
+            createClipsEnabled: true
+          })
+        ]
+      }
+    });
+
+    await expect(
+      chromeStub.emitMessage({
+        type: "UPDATE_SETTINGS",
+        patch: {
+          globalSensitivity: "low",
+          createClipsEnabled: false
+        }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        settings: {
+          globalSensitivity: "low",
+          createClipsEnabled: false
+        },
+        channels: [
+          expect.objectContaining({
+            sensitivity: "high",
+            createClipsEnabled: true
+          })
+        ]
+      }
+    });
+    expect(storage.channels.newchannel.sensitivity).toBe("high");
+    expect(storage.channels.newchannel.createClipsEnabled).toBe(true);
+  });
 });
 
 function createStorage(): StorageShape {
@@ -193,6 +253,7 @@ function createStorage(): StorageShape {
         profileImageUrl: "https://static-cdn.jtvnw.net/summit1g.png",
         enabled: true,
         createClipsEnabled: false,
+        sensitivity: "medium",
         status: "connecting"
       }
     }

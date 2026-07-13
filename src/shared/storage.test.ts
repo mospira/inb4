@@ -79,8 +79,11 @@ describe("hydrateStorage", () => {
     });
   });
 
-  it("drops invalid channel sensitivity", () => {
+  it("replaces invalid channel sensitivity with the saved default", () => {
     const channels = hydrateStorage({
+      settings: {
+        globalSensitivity: "high"
+      },
       channels: {
         test: {
           login: "test",
@@ -91,11 +94,14 @@ describe("hydrateStorage", () => {
       }
     }).channels;
 
-    expect("sensitivity" in channels.test).toBe(false);
+    expect(channels.test.sensitivity).toBe("high");
   });
 
-  it("defaults channel clip creation to explicit opt-in when missing from older storage", () => {
+  it("initializes missing channel settings from the saved defaults", () => {
     const channels = hydrateStorage({
+      settings: {
+        globalSensitivity: "high"
+      },
       channels: {
         test: {
           login: "test",
@@ -106,5 +112,6 @@ describe("hydrateStorage", () => {
     }).channels;
 
     expect(channels.test.createClipsEnabled).toBe(false);
+    expect(channels.test.sensitivity).toBe("high");
   });
 });

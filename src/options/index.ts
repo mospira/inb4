@@ -110,14 +110,14 @@ function render(): void {
             <input name="defaultCooldownSeconds" type="number" min="60" step="30" value="${state.settings.defaultCooldownSeconds}" ${disabled} />
           </label>
           <label>
-            Global sensitivity
+            Default sensitivity
             <select name="globalSensitivity" ${disabled}>${sensitivityOptions(state.settings.globalSensitivity)}</select>
           </label>
           <label class="checkbox-row">
             <input name="notificationsEnabled" type="checkbox" ${state.settings.notificationsEnabled ? "checked" : ""} ${disabled} />
             Notifications
           </label>
-          ${renderToggleControl("Create clips", 'name="createClipsEnabled"', state.settings.createClipsEnabled, controlsDisabled)}
+          ${renderToggleControl("Create clips by default", 'name="createClipsEnabled"', state.settings.createClipsEnabled, controlsDisabled)}
         </form>
       </section>
 
@@ -156,7 +156,7 @@ function renderChannel(channel: PublicAppState["channels"][number]): string {
   const sensitivityControl = channel.enabled
     ? `<label>
           Sensitivity
-          <select data-channel-sensitivity ${disabled}>${sensitivityOptions(channel.sensitivity ?? "", true)}</select>
+          <select data-channel-sensitivity ${disabled}>${sensitivityOptions(channel.sensitivity)}</select>
         </label>`
     : "";
 
@@ -275,9 +275,7 @@ function bindEvents(): void {
           type: "UPDATE_CHANNEL",
           login,
           patch: {
-            sensitivity: select.value
-              ? (select.value as SensitivityPresetName)
-              : null
+            sensitivity: select.value as SensitivityPresetName
           }
         });
       }
@@ -308,7 +306,10 @@ function maybeAutoConnect(): void {
 }
 
 async function runConnect(
-  includeClipScope = Boolean(state?.settings.createClipsEnabled)
+  includeClipScope = Boolean(
+    state?.settings.createClipsEnabled ||
+      state?.channels.some((channel) => channel.createClipsEnabled)
+  )
 ): Promise<void> {
   if (busy) {
     return;

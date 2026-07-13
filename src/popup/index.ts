@@ -123,7 +123,7 @@ function renderChannel(channel: PublicAppState["channels"][number]): string {
   const sensitivityControl = channel.enabled
     ? `<label>
           Sensitivity
-          <select data-channel-sensitivity ${disabled}>${sensitivityOptions(channel.sensitivity ?? "", true)}</select>
+          <select data-channel-sensitivity ${disabled}>${sensitivityOptions(channel.sensitivity)}</select>
         </label>`
     : "";
 
@@ -228,9 +228,7 @@ function bindEvents(): void {
           type: "UPDATE_CHANNEL",
           login,
           patch: {
-            sensitivity: select.value
-              ? (select.value as SensitivityPresetName)
-              : null
+            sensitivity: select.value as SensitivityPresetName
           }
         });
       }

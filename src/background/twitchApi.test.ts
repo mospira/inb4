@@ -243,7 +243,8 @@ describe("twitchApi", () => {
           login: "summit1g",
           broadcasterUserId: "123",
           enabled: true,
-          createClipsEnabled: true
+          createClipsEnabled: true,
+          sensitivity: "medium"
         },
         auth,
         "session-id"

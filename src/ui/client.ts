@@ -108,12 +108,8 @@ export function escapeHtml(value: string): string {
 }
 
 export function sensitivityOptions(
-  selected: SensitivityPresetName | "" | undefined,
-  includeGlobal = false
+  selected: SensitivityPresetName | undefined
 ): string {
-  const globalOption = includeGlobal
-    ? `<option value="" ${selected ? "" : "selected"}>Global default</option>`
-    : "";
   const presetOptions = (
     Object.entries(SENSITIVITY_PRESETS) as Array<
       [SensitivityPresetName, (typeof SENSITIVITY_PRESETS)[SensitivityPresetName]]
@@ -125,7 +121,7 @@ export function sensitivityOptions(
     })
     .join("");
 
-  return `${globalOption}${presetOptions}`;
+  return presetOptions;
 }
 
 type ConnectionStatusTone = "ok" | "warn" | "error";
