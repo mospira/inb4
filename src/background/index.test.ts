@@ -168,6 +168,54 @@ describe("background service worker", () => {
     expect(storage.channels).toEqual({});
   });
 
+  it("subscribes an added channel without replacing a healthy EventSub socket", async () => {
+    const storage = createStorage();
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+    apiMocks.resolveTwitchUser.mockResolvedValue({
+      id: "456",
+      login: "newchannel",
+      display_name: "NewChannel",
+      profile_image_url: "https://static-cdn.jtvnw.net/newchannel.png"
+    });
+
+    await import("./index");
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const activeSocket = MockWebSocket.instances[0];
+    activeSocket.emitMessage(createWelcomeMessage("session-1"));
+
+    await vi.waitFor(() => {
+      expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(1);
+    });
+
+    await expect(
+      chromeStub.emitMessage({ type: "ADD_CHANNEL", login: "newchannel" })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        channels: expect.arrayContaining([
+          expect.objectContaining({
+            login: "newchannel",
+            status: "subscribed"
+          })
+        ])
+      }
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(activeSocket.close).not.toHaveBeenCalled();
+    expect(apiMocks.createChatMessageSubscription).toHaveBeenLastCalledWith(
+      expect.objectContaining({ login: "newchannel" }),
+      expect.objectContaining({ accessToken: "token" }),
+      "session-1"
+    );
+  });
+
   it("copies defaults into a new channel without changing it later", async () => {
     const storage = createStorage();
     storage.channels = {};
