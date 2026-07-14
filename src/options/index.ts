@@ -133,12 +133,11 @@ function render(): void {
         </div>
       </section>
 
-      <section class="section">
-        <h2>Local data</h2>
+      <div class="section">
         <div class="actions">
           <button class="danger" data-action="clear-data" ${disabled}>Clear local data</button>
         </div>
-      </section>
+      </div>
 
       <footer class="options-footer">
         <a href="https://github.com/mospira" target="_blank" rel="noreferrer">github.com/mospira</a>
