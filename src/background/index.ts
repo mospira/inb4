@@ -400,7 +400,7 @@ async function addChannel(input: string): Promise<void> {
       }
     };
   });
-  await ensureEventSub(true);
+  await subscribeAddedChannel(user.login);
 }
 
 async function removeChannel(input: string): Promise<void> {
@@ -788,21 +788,53 @@ async function subscribeEnabledChannels(auth: StoredAuth, sessionId: string): Pr
       continue;
     }
 
-    try {
-      const subscriptionId = await createChatMessageSubscription(channel, auth, sessionId);
-      subscriptionsByLogin.set(channel.login, subscriptionId);
-      await patchChannel(channel.login, {
-        status: "subscribed",
-        errorCode: undefined,
-        errorMessage: undefined
-      });
-    } catch (error) {
-      if (error instanceof TwitchApiError && error.status === 401) {
-        await handleAuthFailure("invalid-auth", "Reconnect Twitch to resume tracking.");
-      }
+    await subscribeChannel(channel, auth, sessionId);
+  }
+}
 
-      await patchChannel(channel.login, subscriptionFailurePatch(error));
+async function subscribeAddedChannel(login: string): Promise<void> {
+  const stored = await loadStorage();
+  const channel = stored.channels[login];
+  const sessionId = eventSubState.sessionId;
+
+  if (
+    !channel?.enabled ||
+    !stored.auth ||
+    !socket ||
+    eventSubState.socketState !== "connected" ||
+    !sessionId ||
+    isCurrentEventSubSocketStale()
+  ) {
+    await ensureEventSub();
+    return;
+  }
+
+  await subscribeChannel(channel, stored.auth, sessionId);
+}
+
+async function subscribeChannel(
+  channel: ChannelConfig,
+  auth: StoredAuth,
+  sessionId: string
+): Promise<void> {
+  try {
+    const subscriptionId = await createChatMessageSubscription(
+      channel,
+      auth,
+      sessionId
+    );
+    subscriptionsByLogin.set(channel.login, subscriptionId);
+    await patchChannel(channel.login, {
+      status: "subscribed",
+      errorCode: undefined,
+      errorMessage: undefined
+    });
+  } catch (error) {
+    if (error instanceof TwitchApiError && error.status === 401) {
+      await handleAuthFailure("invalid-auth", "Reconnect Twitch to resume tracking.");
     }
+
+    await patchChannel(channel.login, subscriptionFailurePatch(error));
   }
 }
 
