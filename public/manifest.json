@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "inb4",
   "version": "1.1.0",
-  "description": "Notify when tracked Twitch chats spike in message velocity.",
+  "description": "A Chrome extension that notifies when Twitch chat velocity spikes.",
   "minimum_chrome_version": "120",
   "action": {
     "default_icon": {
