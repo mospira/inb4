@@ -93,6 +93,8 @@ Chat tracking requests the `user:read:chat` scope. Automatic clip creation is di
 
 `inb4` talks directly to Twitch and does not use a custom application server.
 
+See the [Privacy Policy](PRIVACY.md) for a complete description of the data the extension handles, how it is used, retention and deletion controls, and the parties involved in processing it.
+
 The extension requests these Chrome permissions:
 
 | Permission | Why it is needed |
@@ -108,7 +110,7 @@ The locally stored Twitch access token is sensitive. You can disconnect Twitch o
 
 Distinct-chatter analysis is performed in service-worker memory. Raw chatter IDs and message text are not written to the detector checkpoint; the channel login, bucket counts, hashed message-deduplication tokens, coverage gaps, and detector state are kept in Chrome session storage. Session detector data is also removed by **Clear local data**.
 
-Before a Chrome Web Store release, the project still needs appropriate store privacy disclosures and a published privacy policy covering the locally stored token, tracked-channel metadata, notifications, and optional clip creation.
+Chrome Web Store privacy disclosures must remain consistent with the published Privacy Policy and the extension's current behavior.
 
 ## Development
 
