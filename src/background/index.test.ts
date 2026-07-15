@@ -216,6 +216,110 @@ describe("background service worker", () => {
     );
   });
 
+  it("re-enables a channel without replacing the healthy EventSub socket or duplicating its subscription", async () => {
+    const storage = createStorageWithSecondChannel();
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    await import("./index");
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const activeSocket = MockWebSocket.instances[0];
+    activeSocket.emitMessage(createWelcomeMessage("session-1"));
+
+    await vi.waitFor(() => {
+      expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(2);
+    });
+
+    await chromeStub.emitMessage({
+      type: "UPDATE_CHANNEL",
+      login: "newchannel",
+      patch: { enabled: false }
+    });
+
+    await expect(
+      chromeStub.emitMessage({
+        type: "UPDATE_CHANNEL",
+        login: "newchannel",
+        patch: { enabled: true }
+      })
+    ).resolves.toMatchObject({
+      ok: true,
+      data: {
+        channels: expect.arrayContaining([
+          expect.objectContaining({
+            login: "newchannel",
+            enabled: true,
+            status: "subscribed"
+          })
+        ])
+      }
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(activeSocket.close).not.toHaveBeenCalled();
+    expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(2);
+  });
+
+  it("subscribes only the re-enabled channel when it missed an EventSub reconnect", async () => {
+    const storage = createStorageWithSecondChannel();
+    const chromeStub = createChromeStub(storage);
+    vi.stubGlobal("chrome", chromeStub);
+    vi.stubGlobal("WebSocket", MockWebSocket);
+
+    await import("./index");
+
+    await vi.waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    firstSocket.emitMessage(createWelcomeMessage("session-1"));
+
+    await vi.waitFor(() => {
+      expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(2);
+    });
+
+    await chromeStub.emitMessage({
+      type: "UPDATE_CHANNEL",
+      login: "newchannel",
+      patch: { enabled: false }
+    });
+    await chromeStub.emitMessage({ type: "RECONNECT_EVENTSUB" });
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    const replacementSocket = MockWebSocket.instances[1];
+    replacementSocket.emitMessage(createWelcomeMessage("session-2"));
+
+    await vi.waitFor(() => {
+      expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(3);
+    });
+    expect(apiMocks.createChatMessageSubscription).toHaveBeenLastCalledWith(
+      expect.objectContaining({ login: "summit1g" }),
+      expect.anything(),
+      "session-2"
+    );
+
+    await chromeStub.emitMessage({
+      type: "UPDATE_CHANNEL",
+      login: "newchannel",
+      patch: { enabled: true }
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(replacementSocket.close).not.toHaveBeenCalled();
+    expect(apiMocks.createChatMessageSubscription).toHaveBeenCalledTimes(4);
+    expect(apiMocks.createChatMessageSubscription).toHaveBeenLastCalledWith(
+      expect.objectContaining({ login: "newchannel" }),
+      expect.objectContaining({ accessToken: "token" }),
+      "session-2"
+    );
+  });
+
   it("copies defaults into a new channel without changing it later", async () => {
     const storage = createStorage();
     storage.channels = {};
@@ -306,6 +410,21 @@ function createStorage(): StorageShape {
       }
     }
   };
+}
+
+function createStorageWithSecondChannel(): StorageShape {
+  const storage = createStorage();
+  storage.channels.newchannel = {
+    login: "newchannel",
+    broadcasterUserId: "456",
+    displayName: "NewChannel",
+    profileImageUrl: "https://static-cdn.jtvnw.net/newchannel.png",
+    enabled: true,
+    createClipsEnabled: false,
+    sensitivity: "medium",
+    status: "connecting"
+  };
+  return storage;
 }
 
 function createChromeStub(storage: StorageShape): {
