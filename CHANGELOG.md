@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.1](https://github.com/mospira/inb4/compare/v1.1.0...v1.1.1) (2026-07-15)
+
+
+### Bug Fixes
+
+* hide OAuth redirect URI from users ([#17](https://github.com/mospira/inb4/issues/17)) ([5a40fd9](https://github.com/mospira/inb4/commit/5a40fd9d5d915e38f705a1b17ed172dae7fb204d))
+* polish options page settings ([#15](https://github.com/mospira/inb4/issues/15)) ([0af3236](https://github.com/mospira/inb4/commit/0af3236d19bdda2c6be2305d71ab373bb5986c62))
+* preserve baselines when adding channels ([#10](https://github.com/mospira/inb4/issues/10)) ([cfe098e](https://github.com/mospira/inb4/commit/cfe098e4172e6a6e1ebeb97477884d4a79363d61))
+* preserve channel baselines when re-enabling tracking ([#16](https://github.com/mospira/inb4/issues/16)) ([fb2a760](https://github.com/mospira/inb4/commit/fb2a76003c146362622cd744b82f41a3501f9598))
+* remove local data heading ([#13](https://github.com/mospira/inb4/issues/13)) ([2e74ca1](https://github.com/mospira/inb4/commit/2e74ca10f5168a7201e55e58882d1d3665589f9e))
+
 ## [1.1.0](https://github.com/mospira/inb4/compare/v1.0.0...v1.1.0) (2026-07-13)
 
 
