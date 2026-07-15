@@ -47,7 +47,6 @@ import { resolveEventTimestamp } from "../shared/eventTimestamp";
 import { VelocityEngine } from "../shared/velocity";
 import {
   connectTwitch,
-  getTwitchRedirectUri,
   hasClipEditScope,
   hasRequiredTwitchScopes
 } from "./twitchAuth";
@@ -350,7 +349,6 @@ async function getPublicState(): Promise<PublicAppState> {
     settings: stored.settings,
     channels,
     eventSub: eventSubState,
-    redirectUri: getTwitchRedirectUri(),
     maxTrackedChannels: MAX_TRACKED_CHANNELS
   };
 }

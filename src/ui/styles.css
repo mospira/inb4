@@ -807,24 +807,6 @@ button.channel-remove-button:hover {
   gap: 12px;
 }
 
-.uri-box {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.code-line {
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--text);
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
-  font-size: 12px;
-  padding: 8px 9px;
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 720px) {
   .options-shell {
     width: min(calc(100vw - 24px), 560px);
