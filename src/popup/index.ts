@@ -85,18 +85,6 @@ function render(): void {
         </div>
       </div>
 
-      ${
-        state.auth
-          ? ""
-          : `<section class="section">
-              <h2>Twitch setup</h2>
-              <div class="uri-box">
-                <div class="code-line">${escapeHtml(state.redirectUri)}</div>
-                <button data-action="copy-redirect" ${disabled}>Copy</button>
-              </div>
-            </section>`
-      }
-
       <section class="section">
         ${renderAddChannelForm(Boolean(state.auth) && !busy)}
       </section>
@@ -180,11 +168,6 @@ function bindEvents(): void {
     "click",
     () => chrome.runtime.openOptionsPage()
   );
-  app.querySelector<HTMLButtonElement>("[data-action='copy-redirect']")?.addEventListener(
-    "click",
-    () => void copyRedirectUri()
-  );
-
   app.querySelector<HTMLFormElement>("[data-add-form]")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
@@ -249,21 +232,6 @@ async function openOptionsForConnect(): Promise<void> {
   await chrome.tabs.create({
     url: chrome.runtime.getURL("options.html#connect")
   });
-}
-
-async function copyRedirectUri(): Promise<void> {
-  if (!state) {
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(state.redirectUri);
-    flash = "Redirect URI copied.";
-    flashIsError = false;
-    render();
-  } catch (error) {
-    setFlash(error);
-  }
 }
 
 async function run(

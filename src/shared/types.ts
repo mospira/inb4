@@ -85,7 +85,6 @@ export interface PublicAppState {
   settings: Settings;
   channels: ChannelRuntimeSummary[];
   eventSub: EventSubRuntimeState;
-  redirectUri: string;
   maxTrackedChannels: number;
 }
 

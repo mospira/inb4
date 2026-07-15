@@ -95,14 +95,6 @@ function render(): void {
       </section>
 
       <section class="section">
-        <h2>Twitch setup</h2>
-        <div class="uri-box">
-          <div class="code-line">${escapeHtml(state.redirectUri)}</div>
-          <button data-action="copy-redirect" ${disabled}>Copy</button>
-        </div>
-      </section>
-
-      <section class="section">
         <h2>Settings</h2>
         <form class="setting-grid" data-settings-form>
           <label>
@@ -205,10 +197,6 @@ function bindEvents(): void {
   app.querySelector<HTMLButtonElement>("[data-action='reconnect']")?.addEventListener(
     "click",
     () => void run({ type: "RECONNECT_EVENTSUB" })
-  );
-  app.querySelector<HTMLButtonElement>("[data-action='copy-redirect']")?.addEventListener(
-    "click",
-    () => void copyRedirectUri()
   );
   app.querySelector<HTMLButtonElement>("[data-action='clear-data']")?.addEventListener(
     "click",
@@ -390,21 +378,6 @@ async function flushSettingsQueue(): Promise<void> {
   } finally {
     flushingSettings = false;
     render();
-  }
-}
-
-async function copyRedirectUri(): Promise<void> {
-  if (!state) {
-    return;
-  }
-
-  try {
-    await navigator.clipboard.writeText(state.redirectUri);
-    flash = "Redirect URI copied.";
-    flashIsError = false;
-    render();
-  } catch (error) {
-    setFlash(error);
   }
 }
 
