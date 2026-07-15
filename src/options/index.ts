@@ -70,7 +70,7 @@ function render(): void {
         <div class="brand">
           <div class="brand-title">
             <a class="brand-link" href="https://github.com/mospira/inb4" target="_blank" rel="noreferrer" aria-label="View inb4 on GitHub">
-              <img class="mark" src="/icons/icon128.svg" alt="inb4">
+              <img class="mark options-mark" src="/icons/icon128.svg" alt="inb4">
             </a>
             ${renderConnectionStatusDot(state)}
           </div>
@@ -113,10 +113,7 @@ function render(): void {
             Default sensitivity
             <select name="globalSensitivity" ${disabled}>${sensitivityOptions(state.settings.globalSensitivity)}</select>
           </label>
-          <label class="checkbox-row">
-            <input name="notificationsEnabled" type="checkbox" ${state.settings.notificationsEnabled ? "checked" : ""} ${disabled} />
-            Notifications
-          </label>
+          ${renderToggleControl("Notifications", 'name="notificationsEnabled"', state.settings.notificationsEnabled, controlsDisabled)}
           ${renderToggleControl("Create clips by default", 'name="createClipsEnabled"', state.settings.createClipsEnabled, controlsDisabled)}
         </form>
       </section>
@@ -141,6 +138,7 @@ function render(): void {
 
       <footer class="options-footer">
         <a href="https://github.com/mospira" target="_blank" rel="noreferrer">github.com/mospira</a>
+        <a href="https://github.com/mospira/inb4/blob/master/PRIVACY.md" target="_blank" rel="noreferrer">Privacy policy</a>
       </footer>
     </main>
   `;
