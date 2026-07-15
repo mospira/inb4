@@ -70,7 +70,7 @@ function render(): void {
         <div class="brand">
           <div class="brand-title">
             <a class="brand-link" href="https://github.com/mospira/inb4" target="_blank" rel="noreferrer" aria-label="View inb4 on GitHub">
-              <img class="mark" src="/icons/icon128.svg" alt="inb4">
+              <img class="options-mark" src="/inb4-440x280.jpg" alt="inb4">
             </a>
             ${renderConnectionStatusDot(state)}
           </div>
@@ -141,6 +141,7 @@ function render(): void {
 
       <footer class="options-footer">
         <a href="https://github.com/mospira" target="_blank" rel="noreferrer">github.com/mospira</a>
+        <a href="https://github.com/mospira/inb4/blob/master/PRIVACY.md" target="_blank" rel="noreferrer">Privacy policy</a>
       </footer>
     </main>
   `;

@@ -216,8 +216,11 @@ label,
 }
 
 .options-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   padding-top: 18px;
-  text-align: center;
   font-size: 12px;
 }
 
@@ -258,6 +261,13 @@ label,
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
+  border-radius: var(--radius);
+}
+
+.options-mark {
+  display: block;
+  width: 146.667px;
+  height: auto;
   border-radius: var(--radius);
 }
 
@@ -645,7 +655,9 @@ button.channel-remove-button:hover {
 
 .checkbox-row input {
   width: 16px;
+  height: 16px;
   min-height: 16px;
+  margin: 0;
   accent-color: var(--accent);
 }
 
