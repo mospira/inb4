@@ -459,7 +459,12 @@ async function updateChannel(
       enabled: patch.enabled ?? channel.enabled,
       createClipsEnabled:
         patch.createClipsEnabled ?? channel.createClipsEnabled,
-      status: patch.enabled === false ? "disabled" : channel.status
+      status:
+        patch.enabled === false
+          ? "disabled"
+          : patch.enabled === true
+            ? "connecting"
+            : channel.status
     };
 
     if (Object.prototype.hasOwnProperty.call(patch, "sensitivity")) {
@@ -488,7 +493,7 @@ async function updateChannel(
   }
 
   if (patch.enabled) {
-    await ensureEventSub(true);
+    await subscribeAddedChannel(login);
   }
 }
 
@@ -796,6 +801,21 @@ async function subscribeAddedChannel(login: string): Promise<void> {
   const stored = await loadStorage();
   const channel = stored.channels[login];
   const sessionId = eventSubState.sessionId;
+
+  if (
+    channel?.enabled &&
+    subscriptionsByLogin.has(login) &&
+    socket &&
+    ["connected", "reconnecting"].includes(eventSubState.socketState) &&
+    !isCurrentEventSubSocketStale()
+  ) {
+    await patchChannel(login, {
+      status: "subscribed",
+      errorCode: undefined,
+      errorMessage: undefined
+    });
+    return;
+  }
 
   if (
     !channel?.enabled ||
