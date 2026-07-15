@@ -265,10 +265,8 @@ label,
 }
 
 .options-mark {
-  display: block;
-  width: 146.667px;
-  height: auto;
-  border-radius: var(--radius);
+  width: 60px;
+  height: 60px;
 }
 
 .brand-link {

@@ -70,7 +70,7 @@ function render(): void {
         <div class="brand">
           <div class="brand-title">
             <a class="brand-link" href="https://github.com/mospira/inb4" target="_blank" rel="noreferrer" aria-label="View inb4 on GitHub">
-              <img class="options-mark" src="/inb4-440x280.jpg" alt="inb4">
+              <img class="mark options-mark" src="/icons/icon128.svg" alt="inb4">
             </a>
             ${renderConnectionStatusDot(state)}
           </div>
