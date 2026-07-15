@@ -113,10 +113,7 @@ function render(): void {
             Default sensitivity
             <select name="globalSensitivity" ${disabled}>${sensitivityOptions(state.settings.globalSensitivity)}</select>
           </label>
-          <label class="checkbox-row">
-            <input name="notificationsEnabled" type="checkbox" ${state.settings.notificationsEnabled ? "checked" : ""} ${disabled} />
-            Notifications
-          </label>
+          ${renderToggleControl("Notifications", 'name="notificationsEnabled"', state.settings.notificationsEnabled, controlsDisabled)}
           ${renderToggleControl("Create clips by default", 'name="createClipsEnabled"', state.settings.createClipsEnabled, controlsDisabled)}
         </form>
       </section>
